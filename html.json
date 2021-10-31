@@ -1,0 +1,28 @@
+{
+    "zone-sum": [
+        "<fieldset><legend>Configure Heating Zones</legend>",
+        "<span><a href='/hm?zid=%d'>Zone %d</a>: %s</span><br />",
+        "</fieldset><p />"
+    ],
+    "zone": [
+        "<script type='text/javascript'>function shd() {var bst = document.getElementById('Boost');var dvd = document.getElementById('dv_d');dvd.style.display = bst.checked ? 'block' : 'none';}</script><form method='post' action='/hm'><fieldset><legend>Zone %d</legend><div style='text-align:center'><label for='label'>Label: </label><input style='width:auto' type='text' name='label' value='%s' id='label' maxlength='4'><div style='text-align:center;padding: 10px 0px;'>",
+        "<input type='radio' id='%s' name='modes[]' value='%d' %s onclick='shd()'><label for='%s'>%s</label>",
+        "</div><div style='display:none;text-align:center' id='dv_d'><input type='radio' id='1hr' name='hours[]' value='1' checked><label for='1hr'>1 Hour</label><input type='radio' id='2hrs' name='hours[]' value='2'><label for='2hrs'>2 Hours</label></div>",
+        "<div><button class='button bgrn' type='button' onclick='window.location=\"/hm\";'>Cancel</button></div><div><button name='zone' value='%d' class='button bgrn' type='submit'>Save</button></div></fieldset></form>"
+    ],
+    "sched-sum": [
+        "<fieldset><legend>Configure Heating Schedules</legend>",
+        "<span><a href='/hm?id=%d'>Timer %d</a>: %s-%s (%s) %s</span><br />",
+        "<div><form action='/hm' method='get'><input type='hidden' name='id' value='%d'/><button class='button bgrn'>Add Timer</button></form></div></fieldset>"
+    ],
+    "sched": [
+        "<script>function handleData(){var form_data = new FormData(document.querySelectorAll('form')[1]);if(!form_data.has('days[]')||!form_data.has('zones[]')){document.getElementById('chk_option_error').style.display='block';return false;}else{document.getElementById('chk_option_error').style.display='none';}var on = (document.getElementById('on').value).replace(':', '');var off = (document.getElementById('off').value).replace(':', '');if( !(parseInt(off)>parseInt(on))) {document.getElementById('chk_time_error').style.display='block';return false;}else{document.getElementById('chk_time_error').style.display='none';return true;}}</script><form onsubmit='return handleData()' method='post' action='/hm'><fieldset><legend>Timer %d</legend><div style='text-align:center'><label for='on'>On: </label><input style='width:auto' type='time' name='on' value='%s' id='on'>&nbsp;<label for='off'>Off: </label><input style='width:auto' type='time' name='off' value='%s' id='off'></div><div style='display:none;text-align:center; color:#ff5661;' id='chk_option_error'>Please select at least one day/zone option.</div><div style='display:none;text-align:center; color:#ff5661;' id='chk_time_error'>Off time must be later than On time.</div><div style='text-align:center;padding: 10px 0px;'>",
+        "<input type='checkbox' name='days[]' id='%s' value='%d' %s></checkbox><label for='%s'>%s</label>",
+        "</div><div>Zones:</div>",
+        "<input type='checkbox' name='zones[]' id='%s' value='%d' %s></checkbox><label for='%s'>%s</label><br />",
+        "<div><button class='button bgrn' type='button' onclick='window.location=\"/hm\";'>Cancel</button></div><div><button name='%s' value='%d' class='button bgrn' type='submit'>Save</button></div>",
+        "<div><button name='delete' value='%d' class='button bred' type='submit'>Delete</button></div>",
+        "</fieldset></form>"
+    ],
+    "button": "<p><form id=hm action='hm' style='display: block;' method='get'><button>Configure Heating</button></form></p>"
+}
