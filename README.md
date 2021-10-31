@@ -98,10 +98,15 @@ Options can be enabled/disabled by editing the autoexec file using **Consoles | 
 ## Operation
 
 1. Use the Manage Heating web page to set zone labels, modes and schedules.
-2. If physical buttons are configured, each button can operate an associated zone as follows. SINGLE press: zone will toggle from Auto to Advance mode. Auto on switches to Advance off and Auto off switches to Advance on etc. DOUBLE press: Zone switches zone in the following order with each double press: Auto -> All Day -> Const On -> Const Off -> Auto. TRIPLE press: mode switches from Auto to Boost (1 hour), or if boost is activated, from Boost to Auto.
-3. Ensure that schedule on/off times do not overlap as this may result in unexpected behaviour.
-4. If there is a power cut or the microcontroller is restarted, zones will be restored to their last operating mode.
-5. If you have an MQTT broker, the following is an example payload that the heating controller publishes when a zone changes state:
+
+<img src="/screenshots/manage_heating.png" width="400">
+<img src="/screenshots/manage_zone.png" width="400">
+<img src="/screenshots/manage_schedule.png" width="400">
+
+3. If physical buttons are configured, each button can operate an associated zone as follows. SINGLE press: zone will toggle from Auto to Advance mode. Auto on switches to Advance off and Auto off switches to Advance on etc. DOUBLE press: Zone switches zone in the following order with each double press: Auto -> All Day -> Const On -> Const Off -> Auto. TRIPLE press: mode switches from Auto to Boost (1 hour), or if boost is activated, from Boost to Auto.
+4. Ensure that schedule on/off times do not overlap as this may result in unexpected behaviour.
+5. If there is a power cut or the microcontroller is restarted, zones will be restored to their last operating mode.
+6. If you have an MQTT broker, the following is an example payload that the heating controller publishes when a zone changes state:
 
     17:00:01.609 MQT: wifi2mqtt/Heating-Controller3/tele/RESULT = `{"Heating":{"Mode":"Auto","Zone":3,"Until":"22:30 Sun 31 Oct 21","Power":"On","Label":"HWTR"}}`
 
