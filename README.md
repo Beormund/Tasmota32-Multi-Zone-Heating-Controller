@@ -4,7 +4,7 @@
 
 This is a multi-zone heating controller written in the Berry scripting language designed to run on an ESP32 microcontroller running the latest Tasmota32.bin development branch firmware.
 
-This heating controller gives independent time control over multiple channels or "zones" (1 zone per relay) on a 7 day or weekly programme. Each channel/zone can have any number of programmed on/off schedules. 
+This heating controller gives independent time control over multiple channels or "zones" (1 zone per relay) on a 7 day weekly programme. Each channel/zone can have any number of programmed on/off schedules. 
 
 ## Features
 
@@ -103,7 +103,7 @@ Options can be enabled/disabled by editing the autoexec file using **Consoles | 
 <img src="/screenshots/manage_zone.png" width="400">
 <img src="/screenshots/manage_schedule.png" width="400">
 
-3. If physical buttons are configured, each button can operate an associated zone as follows. SINGLE press: zone will toggle from Auto to Advance mode. Auto on switches to Advance off and Auto off switches to Advance on etc. DOUBLE press: Zone switches zone in the following order with each double press: Auto -> All Day -> Const On -> Const Off -> Auto. TRIPLE press: mode switches from Auto to Boost (1 hour), or if boost is activated, from Boost to Auto.
+3. If physical buttons are configured, each button can operate an associated zone as follows. SINGLE press: zone will toggle from Auto to Advance mode. Auto on switches to Advance off and Auto off switches to Advance on etc. DOUBLE press: Zone switches mode in the following order with each double press: Auto -> All Day -> Const On -> Const Off -> Auto. TRIPPLE press: mode switches from Auto to Boost (1 hour), or if boost is activated, from Boost to Auto.
 4. Ensure that schedule on/off times do not overlap as this may result in unexpected behaviour.
 5. If there is a power cut or the microcontroller is restarted, zones will be restored to their last operating mode.
 6. If you have an MQTT broker, the following is an example payload that the heating controller publishes when a zone changes state:
