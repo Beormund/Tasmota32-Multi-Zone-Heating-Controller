@@ -1,4 +1,4 @@
-#------------------------------------------------------------------------------------------------------
+#  ------------------------------------------------------------------------------------------------------
 #  display.be - Berry scripting language
 #  Copyright (C) 2021 Shaun Brown, Berry language by Guan Wenliang https://github.com/Skiars/berry
 #
@@ -14,17 +14,17 @@
 #
 #  You should have received a copy of the GNU General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#------------------------------------------------------------------------------------------------------
+#  ------------------------------------------------------------------------------------------------------
 
 
 var display = module('display')
 
-#------------------------------------------------------------------------------------
-# This is the driver for the Liquid Crystal LCD displays that use the I2C bus.
-# The backlight is on by default, since that is the most likely operating mode in
-# most cases. It is a direct berry port of the Arduino Liquid Crystal 12C C++ library.
-# Cols and Rows both start at 1, not zero.
-#-------------------------------------------------------------------------------------#
+#  ------------------------------------------------------------------------------------
+#  This is the driver for the Liquid Crystal LCD displays that use the I2C bus.
+#  The backlight is on by default, since that is the most likely operating mode in
+#  most cases. It is a direct berry port of the Arduino Liquid Crystal 12C C++ library.
+#  Cols and Rows both start at 1, not zero.
+#  -------------------------------------------------------------------------------------
 
 class lcd_i2c
 
