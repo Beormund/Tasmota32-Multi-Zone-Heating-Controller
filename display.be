@@ -1,30 +1,30 @@
 #------------------------------------------------------------------------------------------------------
-  display.be - Berry scripting language
-  Copyright (C) 2021 Shaun Brown, Berry language by Guan Wenliang https://github.com/Skiars/berry
-
-  This program is free software: you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation, either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-------------------------------------------------------------------------------------------------------#
+#  display.be - Berry scripting language
+#  Copyright (C) 2021 Shaun Brown, Berry language by Guan Wenliang https://github.com/Skiars/berry
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#------------------------------------------------------------------------------------------------------
 
 
 var display = module('display')
 
 #------------------------------------------------------------------------------------
- This is the driver for the Liquid Crystal LCD displays that use the I2C bus.
- The backlight is on by default, since that is the most likely operating mode in
- most cases. It is a direct berry port of the Arduino Liquid Crystal 12C C++ library.
- Cols and Rows both start at 1, not zero.
--------------------------------------------------------------------------------------#
+# This is the driver for the Liquid Crystal LCD displays that use the I2C bus.
+# The backlight is on by default, since that is the most likely operating mode in
+# most cases. It is a direct berry port of the Arduino Liquid Crystal 12C C++ library.
+# Cols and Rows both start at 1, not zero.
+#-------------------------------------------------------------------------------------#
 
 class lcd_i2c
 
@@ -80,15 +80,13 @@ class lcd_i2c
 
     var address, wire, rows, cols, charsize, backlight, displaycontrol, displaymode
 
-    #-
-      Constructor
-	
-	  @param address	I2C slave address of the LCD display. Most likely printed on the
-                        LCD circuit board, or look in the supplied LCD documentation.
-	  @param cols       Number of columns your LCD display has.
-	  @param rows       Number of rows your LCD display has.
-	  @param charsize   The size in dots that the display has, use LCD_5x10DOTS or LCD_5x8DOTS.
-	-#
+    #  Constructor
+    #
+    #  @param address    I2C slave address of the LCD display. Most likely printed on the
+    #                    LCD circuit board, or look in the supplied LCD documentation.
+    #  @param cols       Number of columns your LCD display has.
+    #  @param rows       Number of rows your LCD display has.
+    #  @param charsize   The size in dots that the display has, use LCD_5x10DOTS or LCD_5x8DOTS.
     def init(address, rows, cols, charsize)
         self.address = address ? address : 0x27
         self.rows = rows ? rows : 4
