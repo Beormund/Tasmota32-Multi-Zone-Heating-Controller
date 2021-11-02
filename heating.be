@@ -1,20 +1,20 @@
 #------------------------------------------------------------------------------------------------------
-  heating.be - Berry scripting language
-  Copyright (C) 2021 Shaun Brown, Berry language by Guan Wenliang https://github.com/Skiars/berry
-
-  This program is free software: you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation, either version 3 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-------------------------------------------------------------------------------------------------------#
+#  heating.be - Berry scripting language
+#  Copyright (C) 2021 Shaun Brown, Berry language by Guan Wenliang https://github.com/Skiars/berry
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#------------------------------------------------------------------------------------------------------
 
 import string
 import webserver
@@ -88,7 +88,7 @@ heating.options = options
 
 class util
     # Weekday names. Sun = 0, Sat = 6
-     static days = [
+    static days = [
         'Sun', # 1 << 0
         'Mon', # 1 << 1
         'Tue', # 1 << 2
@@ -98,13 +98,13 @@ class util
         'Sat'  # 1 << 6
     ]
     #---------------------------------------------------------------------------------------------------
-     Auto:  zone follows all programmed switching times specified in schedules 
-     Boost: zone turns on for 1 or 2 hours if off or extends time if on, then returns to previous mode
-     On:    zone constantly on irrespective of schedules
-     Off:   zone constantly off irrespective of schedules
-     Adv:   zone brought On if currently Off or Off if currently On until next schedule switcching time
-     Day:   zone operates from first On time until last Off time ignoring switching times in between
-    ---------------------------------------------------------------------------------------------------#
+    # Auto:  zone follows all programmed switching times specified in schedules 
+    # Boost: zone turns on for 1 or 2 hours if off or extends time if on, then returns to previous mode
+    # On:    zone constantly on irrespective of schedules
+    # Off:   zone constantly off irrespective of schedules
+    # Adv:   zone brought On if currently Off or Off if currently On until next schedule switching time
+    # Day:   zone operates from first On time until last Off time ignoring switching times in between
+    #---------------------------------------------------------------------------------------------------
     static modes = [
         'Auto', # 0
         'Boost', # 1
