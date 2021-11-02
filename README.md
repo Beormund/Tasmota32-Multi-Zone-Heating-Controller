@@ -95,6 +95,31 @@ Navigate to **Consoles | Manage File system** and upload the following files fro
 
 Options can be enabled/disabled by editing the autoexec file using **Consoles | Manage File system** and clicking on the edit icon next to the autoexec script.
 
+```python
+# Import heating.be from file system
+import heating
+# Set the number of heating zones (3 zones by default)
+heating.options.zones = 3
+# Basic support for I2C LCD 20x4/20x2 display
+# Requires display.be to be uploaded to file system
+heating.options.use_lcd = true
+# Synchronise the relay web toggle button labels
+# with the heating controller zone labels 
+heating.options.sync_webbuttons = true
+# WS2812 pin needs to be configured for LED
+# pixel indicator support
+heating.options.use_indicators = true
+# Eable Tasmota/MQTT "zone" command to change
+# power state ofh eating zones
+heating.options.use_cmd = true
+# Publish MQTT heating zone telemetry
+heating.options.use_mqtt = true
+# Initialise heating controller
+var hc = heating.controller()
+# Start the heating controller
+hc.start()
+```
+
 ## Operation
 
 1. Use the Manage Heating web page to set zone labels, modes and schedules.
@@ -108,7 +133,9 @@ Options can be enabled/disabled by editing the autoexec file using **Consoles | 
 5. If there is a power cut or the microcontroller is restarted, zones will be restored to their last operating mode.
 6. If you have an MQTT broker, the following is an example payload that the heating controller publishes when a zone changes state:
 
-    17:00:01.609 MQT: wifi2mqtt/Heating-Controller3/tele/RESULT = `{"Heating":{"Mode":"Auto","Zone":3,"Until":"22:30 Sun 31 Oct 21","Power":"On","Label":"HWTR"}}`
+```yaml
+17:00:01.609 MQT: wifi2mqtt/Heating-Controller3/tele/RESULT = `{"Heating":{"Mode":"Auto","Zone":3,"Until":"22:30 Sun 31 Oct 21","Power":"On","Label":"HWTR"}}`
+```
 
 ## Known Issues
 
