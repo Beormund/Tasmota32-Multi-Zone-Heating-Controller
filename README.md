@@ -12,12 +12,14 @@ This heating controller gives independent time control over multiple channels or
 * Each heating zone can be programmed using 1 or more schedules
 * Schedules and zones can be configured using a custom "Manage Heating" web page
 * Custom labels can be specified for each zone
-* A basic I2C LCD 20x4 screen is supported out of the box. The first line display date/time; the other 3 lines display on/off times for up to 3 zones.
 * Individual WS2812 LED pixels can indicate zone status 
 * One physical push button per zone is supported with different actions available via single, double and tripple press.
 * Each zone can be put into manual override. Several manual override modes are available (see Operating Modes below)
 * A custom Tasmota "zone" command can be used to turn the zone on/off and switch mode. `zone1 1` turns zone 1 on. `zone1 {"mode": 5}` switches zone 1 to "All Day" mode. `zone2 {"mode": 0}` switches zone 2 to "Auto Mode".
 * If Alexa/Hue emulation is enabled, when the power state of the relay is changed via Alexa (or MQTT or by pressing the Tasmota web UI relay buttons) the relevant heating zone's status is synchronised.
+* A basic I2C LCD 20x4 screen is supported out of the box. The first line display date/time; the other 3 lines display on/off times for up to 3 zones.
+
+<img src="screenshots/lcd.jpg" width="400">
 
 ### Operating Modes
 
