@@ -1,4 +1,4 @@
-# ------------------------------------------------------------------------------------------------------
+#  ------------------------------------------------------------------------------------------------------
 #  heating.be - Berry scripting language
 #  Copyright (C) 2021 Shaun Brown, Berry language by Guan Wenliang https://github.com/Skiars/berry
 #
@@ -14,7 +14,7 @@
 #
 #  You should have received a copy of the GNU General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-# ------------------------------------------------------------------------------------------------------
+#  ------------------------------------------------------------------------------------------------------
 
 import string
 import webserver
@@ -88,7 +88,7 @@ heating.options = options
 
 class util
     # Weekday names. Sun = 0, Sat = 6
-    static days = [
+     static days = [
         'Sun', # 1 << 0
         'Mon', # 1 << 1
         'Tue', # 1 << 2
@@ -115,12 +115,12 @@ class util
     ]
     # Set indicator color for each mode
     static colors = [
-        "00FF00", # Green
-        "800080", # Purple
-        "088F8F", # Dar Cyan
-        "FF00FF", # Magenta
-        "0000FF", # Blue
-        "FFFF00"  # Yello
+        '00FF00', # Green
+        '800080', # Purple
+        '088F8F', # Dar Cyan
+        'FF00FF', # Magenta
+        '0000FF', # Blue
+        'FFFF00'  # Yello
     ]
     # Settings are retrieved from persist. Call config.load() to hydrate schedules and zones
     static settings = heating.api.get_persist()
@@ -164,13 +164,13 @@ class screen
     end
     def update_clock()
         var ls = heating.api.rtc()['local']
-        self.lcd.write_line(heating.api.strftime("%H:%M %a %d %b %y", ls), 1)
+        self.lcd.write_line(heating.api.strftime('%H:%M %a %d %b %y', ls), 1)
     end
     def print(line, text)
         self.lcd.write_line(text, line)
     end
     def clear_line(line)
-        self.lcd.write_line("", line)
+        self.lcd.write_line('', line)
     end
     def clear_screen()
         self.lcd.clear()
@@ -190,18 +190,18 @@ class status
         self.power = power
         self.expiry = expiry
     end
-    # Display max 20 chars: e.g., "HTG1 off until 16:30"
+    # Display max 20 chars: e.g., 'HTG1 off until 16:30'
     def set_lcd()
         if !util.lcd return end
-        var message = self._call(false, "%s %s until %s")
+        var message = self._call(false, '%s %s until %s')
         util.lcd.print(self.zone+2, message) 
     end
     # WS2812 LED (1 pixel per zone) indicator
     def set_led()
         if !heating.options.use_indicators return end
-        var led = "Led" .. self.zone+1
-        var color = self.power ? util.colors[self.mode] : "FF0000"
-        heating.api.cmd(string.format("%s #%s", led, color))
+        var led = 'Led' .. self.zone+1
+        var color = self.power ? util.colors[self.mode] : 'FF0000'
+        heating.api.cmd(string.format('%s #%s', led, color))
     end
     # Publish this status as an MQTT message
     def pub_mqtt()
@@ -211,11 +211,11 @@ class status
     end
     # Log info with the BRY: prefix
     def log_info()
-        heating.api.log("BRY: " .. self.get_info())
+        heating.api.log('BRY: ' .. self.get_info())
     end
-    # E.g., "HTG1 Auto off until 16:30 Mon 18 Oct 21"
+    # E.g., 'HTG1 Auto off until 16:30 Mon 18 Oct 21'
     def get_info()
-        return self._call(true, "%s %s %s until %s",  util.modes[self.mode])
+        return self._call(true, '%s %s %s until %s',  util.modes[self.mode])
     end
     # Update logs, LED, MQTT and LCD screen
     def notify()
@@ -230,13 +230,13 @@ class status
     # Short time: 16:30; Detailed time: 16:30 Mon 18 Oct 21
     def _getdt(secs, detailed)
         return detailed 
-            ? heating.api.strftime("%H:%M %a %d %b %y", secs)
-            : heating.api.strftime("%R", secs)
+            ? heating.api.strftime('%H:%M %a %d %b %y', secs)
+            : heating.api.strftime('%R', secs)
     end
-    # If mode is On/Off print "Const on/off"
+    # If mode is On/Off print 'Const on/off'
     def _const()
         return string.format(
-            "%s Const %s", 
+            '%s Const %s', 
             util.settings.zones[self.zone]['l'], 
             self.power ? 'on' : 'off')
     end
@@ -375,7 +375,7 @@ class schedule: map
     def secs2str(secs)
         var hours = (secs/60)/60
         var mins = (secs/60)%60
-        return string.format("%02d:%02d", hours, mins)
+        return string.format('%02d:%02d', hours, mins)
     end
     # Converts a time map to seconds from midnight
     # {'hour': 10, "min": 15, "sec": 0}
@@ -397,7 +397,7 @@ class schedule: map
             l+=1
             t =  heating.api.time_dump(l)
         end
-        t.setitem("sfm", self.time2secs(t))
+        t.setitem('sfm', self.time2secs(t))
         t.setitem('local', l)
         return t
     end
@@ -522,7 +522,7 @@ class schedules : list
     # Gets the current weekday (0-6)
     def get_today()
         var ls = heating.api.rtc()['local']
-        return int(heating.api.strftime("%w", ls))
+        return int(heating.api.strftime('%w', ls))
     end
     # Increments 0-5 by 1 and sets 6 to 0
     def get_next_day(day)
@@ -593,7 +593,7 @@ class config
         else
             util.settings.zones = zones()
             for i: 1 .. heating.options.zones
-                util.settings.zones.add_zone("ZN" .. i)
+                util.settings.zones.add_zone('ZN' .. i)
             end
         end
         if util.settings.has('schedules')
@@ -620,7 +620,7 @@ class config
             end
         elif diff < 0 # Need to append
             for i: util.settings.zones.size()+1 .. heating.options.zones
-                self.add_zone("ZN" .. i)
+                self.add_zone('ZN' .. i)
                 for s: util.settings.schedules
                     s['z'] = (s['z']<<diff)|((1<<diff)-1)
                 end
@@ -724,6 +724,7 @@ class scheduler
         end
         # Force the updated configuration to be saved to flash
         util.config.save()
+        # Set the schedule's next switching timer
         self.set_timer(s)
     end
     def on_completed(stat)
@@ -846,7 +847,7 @@ class override
         self.clocks.remove(id)
         util.settings.zones.set_power(zone, false, true)
         heating.api.log(string.format(
-            "BRY: %s boost off", 
+            'BRY: %s boost off', 
             util.settings.zones[zone]['l'])
         )
     end
@@ -1015,13 +1016,13 @@ class ScheduleEditor
         s = s ? s : schedule()
         webserver.content_send(string.format(html[0], id, s.secs2str(s['1']), s.secs2str(s['0'])))
         for d: 0 .. util.days.size()-1
-            var checked = s.is_set('d', d) ? "checked" : ""
+            var checked = s.is_set('d', d) ? 'checked' : ''
             var dl = util.days[d]
             webserver.content_send(string.format(html[1], dl, 1 << d, checked, dl, dl))
         end
         webserver.content_send(html[2])
         for z: 0 .. util.settings.zones.size()-1
-            var checked = s.is_set('z', z) ? "checked" : "", zl = util.settings.zones[z]['l']
+            var checked = s.is_set('z', z) ? 'checked' : '', zl = util.settings.zones[z]['l']
             webserver.content_send(string.format(html[3], zl, 1 << z, checked, zl, zl))
         end
         webserver.content_send(string.format(html[4], action, id))
@@ -1064,7 +1065,7 @@ class WebManager : Driver
     end
     # Updates a zone based on web form entry
     def update_zone()
-        var id = int(webserver.arg("zone"))
+        var id = int(webserver.arg('zone'))
         if webserver.has_arg('label')
             var label = webserver.arg('label')
             if size(label) > 0 && label != util.settings.zones[id]['l']
@@ -1096,16 +1097,16 @@ class WebManager : Driver
     # Deletes/Updates/Creates a schedule based on web form entry
     def update_schedule()
         if webserver.has_arg('delete')
-            var id = int(webserver.arg("delete"))
+            var id = int(webserver.arg('delete'))
             util.settings.schedules.pop(id)
             return true
         elif webserver.has_arg('update')
-            var id = int(webserver.arg("update"))
+            var id = int(webserver.arg('update'))
             var schedule = schedule()
             self.fill_schedule(id, schedule)
             return util.settings.schedules.update(schedule)
         elif webserver.has_arg('new')
-            var id = int(webserver.arg("new"))
+            var id = int(webserver.arg('new'))
             var schedule = schedule()
             self.fill_schedule(id, schedule)
             util.settings.schedules.push(schedule)
@@ -1116,11 +1117,11 @@ class WebManager : Driver
     def page_heating_mgr()
         if !webserver.check_privileged_access() return nil end
         if !self.html self.html = file().load('html.json') end
-        webserver.content_start("Configure Heating")
+        webserver.content_start('Configure Heating')
         webserver.content_send_style()
         if webserver.has_arg('id')
             ScheduleSummary().show_schedules(self.html['sched-sum'])
-            ScheduleEditor().show_editor(int(webserver.arg("id")), self.html['sched'])
+            ScheduleEditor().show_editor(int(webserver.arg('id')), self.html['sched'])
         elif webserver.has_arg('zid')
             ZoneSummary().show_zones(self.html['zone-sum'])
             ZoneEditor().show_editor(int(webserver.arg('zid')), self.html['zone'])
@@ -1146,8 +1147,8 @@ class WebManager : Driver
     end
     # Add HTTP POST and GET handlers
     def web_add_handler()
-        webserver.on("/hm", / -> self.page_heating_mgr(), webserver.HTTP_GET)
-        webserver.on("/hm", / -> self.page_heating_ctl(), webserver.HTTP_POST)
+        webserver.on('/hm', / -> self.page_heating_mgr(), webserver.HTTP_GET)
+        webserver.on('/hm', / -> self.page_heating_ctl(), webserver.HTTP_POST)
     end
 end
 
@@ -1183,7 +1184,7 @@ class HeatingController
     def start()
         # Indicate the heating controller is starting up
         if util.lcd
-            util.lcd.print(1, "Starting...")
+            util.lcd.print(1, 'Starting...')
         end
         # Fires when RTC has initialized 
         heating.api.add_rule('Time#Initialized', /  -> self.time_initialized())
@@ -1194,15 +1195,15 @@ class HeatingController
         # Register a button press and power change trigger for each zone
         for i: 1 .. heating.options.zones
             heating.api.add_rule(
-                string.format("Button%d#Action", i), / v, t -> self.button_pressed(v, t)
+                string.format('Button%d#Action', i), / v, t -> self.button_pressed(v, t)
             )
             heating.api.add_rule(
-                string.format("POWER%d#State", i), / v, t -> self.power_changed(v, t)
+                string.format('POWER%d#State', i), / v, t -> self.power_changed(v, t)
             )
         end
         # If use_cmd option set, register a zone command.
         if heating.options.use_cmd
-            heating.api.add_cmd("zone", / c, i, p, j -> self.on_zone_cmd(c, i, p, j))
+            heating.api.add_cmd('zone', / c, i, p, j -> self.on_zone_cmd(c, i, p, j))
         end
         # Load the web driver
         tasmota.add_driver(self.web_manager)
@@ -1236,11 +1237,11 @@ class HeatingController
     # Handler for physical buttons
     def button_pressed(v, t)
         var zone = int(t[6])-1
-        if v == "SINGLE"
+        if v == 'SINGLE'
             self.set_mode(zone, {0:4,4:0})
-        elif v == "DOUBLE"
+        elif v == 'DOUBLE'
             self.set_mode(zone, {0:5,5:2,2:3,3:0})
-        elif v == "TRIPLE"
+        elif v == 'TRIPLE'
             self.set_mode(zone, {0:1,1:0})
         end
     end
@@ -1272,7 +1273,7 @@ class HeatingController
                 self.cmd_set_power(zone, mode, payload)
             end
         end
-        var message = string.toupper(string.format("%s%d", cmd, idx))
+        var message = string.toupper(string.format('%s%d', cmd, idx))
         heating.api.resp_cmnd(string.format('{"%s": "DONE"}', message))
     end
     # Change the operating mode for the zone if different from current mode
