@@ -13,7 +13,7 @@ This heating controller gives independent time control over multiple channels or
 * Schedules and zones can be configured using a custom "Manage Heating" web page
 * Custom labels can be specified for each zone
 * Individual WS2812 LED pixels can indicate zone status 
-* One physical push button per zone is supported with different actions available via single, double and tripple press.
+* One physical push button per zone is supported with different actions available via single, double and triple press.
 * Each zone can be put into manual override. Several manual override modes are available (see Operating Modes below)
 * A custom Tasmota "zone" command can be used to turn the zone on/off and switch mode. `zone1 1` turns zone 1 on. `zone1 {"mode": 5}` switches zone 1 to "All Day" mode. `zone2 {"mode": 0}` switches zone 2 to "Auto Mode".
 * If Alexa/Hue emulation is enabled, when the power state of the relay is changed via Alexa (or MQTT or by pressing the Tasmota web UI relay buttons) the relevant heating zone's status is synchronised.
@@ -130,7 +130,7 @@ hc.start()
 <img src="/screenshots/manage_zone.png" width="400">
 <img src="/screenshots/manage_schedule.png" width="400">
 
-3. If physical buttons are configured, each button can operate an associated zone as follows. SINGLE press: zone will toggle from Auto to Advance mode. Auto on switches to Advance off and Auto off switches to Advance on etc. DOUBLE press: Zone switches mode in the following order with each double press: Auto -> All Day -> Const On -> Const Off -> Auto. TRIPPLE press: mode switches from Auto to Boost (1 hour), or if boost is activated, from Boost to Auto.
+3. If physical buttons are configured, each button can operate an associated zone as follows. SINGLE press: zone will toggle from Auto to Advance mode. Auto on switches to Advance off and Auto off switches to Advance on etc. DOUBLE press: Zone switches mode in the following order with each double press: Auto -> All Day -> Const On -> Const Off -> Auto. TRIPLE press: mode switches from Auto to Boost (1 hour), or if boost is activated, from Boost to Auto.
 4. Ensure that schedule on/off times do not overlap as this may result in unexpected behaviour.
 5. If there is a power cut or the microcontroller is restarted, zones will be restored to their last operating mode.
 6. If you have an MQTT broker, the following is an example payload that the heating controller publishes when a zone changes state:
