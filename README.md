@@ -112,7 +112,7 @@ heating.options.sync_webbuttons = true
 # pixel indicator support
 heating.options.use_indicators = true
 # Eable Tasmota/MQTT "zone" command to change
-# power state ofh eating zones
+# power state of heating zones
 heating.options.use_cmd = true
 # Publish MQTT heating zone telemetry
 heating.options.use_mqtt = true
