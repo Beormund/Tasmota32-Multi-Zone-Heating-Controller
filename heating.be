@@ -906,7 +906,7 @@ class override
     end
 end
 
-# Contains logic to display list of schedules in 'Manage Heating'
+# Contains logic to display list of schedules in 'Configure Heating'
 class ScheduleSummary
     # Get list of day indices
     # bits 30 -> [1,2,3,4]
@@ -978,7 +978,7 @@ class ScheduleSummary
     end
 end
 
-# Displays a list of zones in 'Manage Heating'
+# Displays a list of zones in 'Configure Heating'
 class ZoneSummary
     def show_zones(html)
         webserver.content_send(html[0])
@@ -1033,7 +1033,7 @@ class ScheduleEditor
     end
 end
 
-# HTTP driver for "Manage Heating" page
+# HTTP driver for "Configure Heating" page
 class WebManager : Driver
     var controller, restart, html, button
     def init(restart)
@@ -1042,7 +1042,7 @@ class WebManager : Driver
         self.button = self.html['button']
         self.html = nil
     end
-    # Displays a "Manage Heating" button on the configuration page
+    # Displays a "Configure Heating" button on the configuration page
     def web_add_config_button()
         webserver.content_send(self.button)
     end
