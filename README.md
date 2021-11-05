@@ -10,7 +10,7 @@ This heating controller gives independent time control over multiple channels or
 
 * Multi heating zone support (only limited by the number of relays attached to the ESP32 microcontroller)
 * Each heating zone can be programmed using 1 or more schedules
-* Schedules and zones can be configured using a custom "Manage Heating" web page
+* Schedules and zones can be configured using a custom "Configure Heating" web page
 * Custom labels can be specified for each zone
 * Individual WS2812 LED pixels can indicate zone status 
 * One physical push button per zone is supported with different actions available via single, double and triple press.
@@ -124,7 +124,7 @@ hc.start()
 
 ## Operation
 
-1. Use the Manage Heating web page to set zone labels, modes and schedules.
+1. Use the Configure Heating web page to set zone labels, modes and schedules.
 
 <img src="/screenshots/manage_heating.png" width="400">
 <img src="/screenshots/manage_zone.png" width="400">
