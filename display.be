@@ -91,7 +91,7 @@ class lcd_i2c
         self.address = address ? address : 0x27
         self.rows = rows ? rows : 4
         self.cols = cols ? cols : 20
-        self.charsize = self.LCD_5x8DOTS
+        self.charsize = charsize ? charsize : self.LCD_5x8DOTS
         self.backlight = self.LCD_BACKLIGHT
         self.wire = tasmota.wire_scan(self.address)
         # Start the display
@@ -107,7 +107,7 @@ class lcd_i2c
         if self.charsize != 0 && self.rows == 1
             displayfunction |= self.LCD_5x10DOTS
         end
-        # Reeset expanderand turn backlight off (Bit 8 =1)
+        # Reeset expander and turn backlight off (Bit 8 =1)
         self.expand_write(self.backlight)
         tasmota.delay(1)
         # We start in 8bit mode, try to set 4 bit mode
@@ -122,7 +122,7 @@ class lcd_i2c
     	tasmota.delay(1)
         # set to 4-bit interface
         self.write4bits(0x02 << 4)
-        # Set # lines, font size, etc.
+        # Set lines, font size, etc.
 	self.command(self.LCD_FUNCTIONSET | displayfunction)
         # Turn the display on with no cursor or blinking default
 	self.displaycontrol = self.LCD_DISPLAYON | self.LCD_CURSOROFF | self.LCD_BLINKOFF
@@ -173,7 +173,7 @@ class lcd_i2c
 	self.displaycontrol |= self.LCD_CURSORON
 	self.command(self.LCD_DISPLAYCONTROL | self.displaycontrol)
     end
-    # TTurn on and off the blinking cursor
+    # Turn on and off the blinking cursor
     def no_blink()
 	self.displaycontrol &= ~self.LCD_BLINKON
 	self.command(self.LCD_DISPLAYCONTROL | self.displaycontrol)
