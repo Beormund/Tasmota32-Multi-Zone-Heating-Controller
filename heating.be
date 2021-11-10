@@ -233,17 +233,14 @@ class status
             ? heating.api.strftime('%H:%M %a %d %b %y', secs)
             : heating.api.strftime('%R', secs)
     end
-    # If mode is On/Off print 'Const on/off'
-    def _const()
-        return string.format(
-            '%s Const %s', 
-            util.settings.zones[self.zone]['l'], 
-            self.power ? 'on' : 'off')
-    end
     # Calls string.format with varying args
     def _call(detailed, *args)
         if self.mode == 2 || self.mode == 3
-            return self._const()
+            return string.format(
+                '%s Const %s', 
+                util.settings.zones[self.zone]['l'], 
+                self.power ? 'on' : 'off'
+            )
         else
             var t = self._getdt(self.expiry, detailed)
             args.insert(1, util.settings.zones[self.zone]['l'])
@@ -352,6 +349,11 @@ end
 
 # A schedule can specify switching times for 1 or more zones
 # Schedules can be created/edited/deleted using the Configure Heating page
+# schedule['i'] = id
+# schedule['1'] = "On" time in seconds from midnight
+# schedule['0'] = "Off" time in seconds from midnight
+# schedule['d'] = Days (Sun = 1 << 0, Mon = 1 << 1 etc)
+# schedule['z'] = Zones (ZN1 = 1 << 0, ZN2 = 1 << 1 etd)
 class schedule: map
     def init(m)
         super(self).init()
@@ -659,27 +661,22 @@ class scheduler
         heating.api.set_timer(millis, / -> self.on_pop(s), 'schedule')
     end
     # This method is only used when the scheduler is first run.
-    # It retrieves statuses for next run times for all zones
+    # It retrieves statuses for next auto mode run times
     def on_start()
         self.running = true
         for z: 0 .. util.settings.zones.size()-1
-            var stat = util.config.get_next_status(z)
-            if stat.mode > 0
-                # If mode is override then we still need to set schedule power state
-                var p = util.settings.schedules.get_next_status(z).power
-                util.settings.zones.set_power(z, p)
+            if util.settings.zones.get_mode(z)
+                # If mode is override set schedule power state
+                var power = util.settings.schedules.get_next_status(z).power
+                util.settings.zones.set_power(z, power)
             else
-                # Set initial power states and display/log schedule status messages
-                self.on_completed(stat)
+                # Set power states and display/log schedule status
+                self.on_completed(z)
             end
         end
     end
     # Called when a schedule on or off time expires/completes
     def on_pop(s)
-        def call_completed(zone)
-            var stat = util.config.get_next_status(zone)
-            self.on_completed(stat)
-        end
         if !self.running return end
         # Get the power state for the schedule
         var power = s.is_running()
@@ -690,36 +687,21 @@ class scheduler
             # What mode is the zone in?
             var mode = util.settings.zones.get_mode(zone)
             if mode == 0 # Auto
-                call_completed(zone)
+                self.on_completed(zone)
             elif mode == 4 # Advance
                 # If previous mode was Day switch back to Day mode, else Auto
                 var previous = util.settings.zones.get_mode(zone, true) == 5 ? 5 : 0
                 # Update zone configuration state
                 util.settings.zones.set_zone(zone, previous, power)
-                call_completed(zone)
+                self.on_completed(zone)
             elif mode == 5 # Daytime
-                # Get the first on schedule and last off schedule
-                var dt = util.settings.schedules.get_daytime(zone)
-                # Does the current schedule match the first on or last off schedule?
-                var matched = power ? dt['on']['i'] == s['i'] : dt['off']['i'] == s['i']
-                if matched
-                    var expiry
-                    if power
-                        # If schedule is running, expiry is the next off time 
-                        expiry = dt['off'].get_runat(dt['off']['0'])
-                    else
-                        # If schedule has switched off, get the next day's first on schedule
-                        var nfo = util.settings.schedules.get_next_first_on(zone)
-                        # If schedule is off get the next days first on time
-                        expiry = nfo.get_runat(nfo['1'])
-                    end
-                    # Update zone configuration state
-                    util.settings.zones.set_zone(zone, 5, power, expiry)
-                    call_completed(zone)
+                # If schedule matches first on/last off, update power, expriry etc
+                if util.override.check_day(zone, s, power) 
+                    self.on_completed(zone)
                 else
-                    # If the current schedule doesn't match first on/last off, update power
+                    # If the current schedule doesn't match update schedule power
                     util.settings.zones.set_power(zone, power)
-                end                 
+                end
             end
         end
         # Force the updated configuration to be saved to flash
@@ -727,11 +709,12 @@ class scheduler
         # Set the schedule's next switching timer
         self.set_timer(s)
     end
-    def on_completed(stat)
-        # Update the power state for the zone
-        util.settings.zones.set_power(stat.zone, stat.power, stat.mode)
+    def on_completed(zone)
+        var stat = util.config.get_next_status(zone)
+        # Update the power and expiry/next run time for the zone
+        util.settings.zones.set_zone(zone, stat.mode, stat.power, stat.expiry)
         # Set the power state of the relay
-        heating.api.set_power(stat.zone, stat.power)
+        heating.api.set_power(zone, stat.power)
         # Update logs, LED, MQTT and LCD screen
         stat.notify()
     end
@@ -846,6 +829,7 @@ class override
         heating.api.remove_timer(id)
         self.clocks.remove(id)
         util.settings.zones.set_power(zone, false, true)
+        util.settings.zones.set_expiry(zone, 0)
         heating.api.log(string.format(
             'BRY: %s boost off', 
             util.settings.zones[zone]['l'])
@@ -872,8 +856,8 @@ class override
         util.settings.zones.set_zone(zone, 3, false)
     end
     # Switch zone on from first 'ON' time until last 'OFF' time 
-    def day(zone)
-        var dt = util.settings.schedules.get_daytime(zone)
+    def day(zone, _dt)
+        var dt = _dt ? _dt : util.settings.schedules.get_daytime(zone)
         if !dt['on'] || !dt['off'] 
             self.set(zone, 0)
             return
@@ -883,7 +867,8 @@ class override
         var off = dt['off'].get_runat(dt['off']['0'])
         var power = (on > off || on <= n['local']) && n['local'] <= off
         var expiry
-        if power expiry = off
+        if power 
+            expiry = off
         elif n['sfm'] < dt['on']['1']
             expiry = on
         elif n['sfm'] > dt['off']['0']
@@ -891,6 +876,14 @@ class override
             expiry = nfo.get_runat(nfo['1'])
         end
         util.settings.zones.set_zone(zone, 5, power, expiry)
+    end
+    # Used by scheduler to test if schedule matches day first on or last off time
+    def check_day(zone, s, power)
+        var dt = util.settings.schedules.get_daytime(zone)
+        if power ? dt['on']['i'] == s['i'] : dt['off']['i'] == s['i']
+            self.day(zone, dt)
+            return true
+        end
     end
     # Refresh overrides for all zones on re-start or schedule/zone changes.
     def refresh()
@@ -906,8 +899,8 @@ class override
     end
 end
 
-# Contains logic to display list of schedules in 'Configure Heating'
-class ScheduleSummary
+# Display Schedule Summary/Editor in 'Configure Heating'
+class ScheduleGUI
     # Get list of day indices
     # bits 30 -> [1,2,3,4]
     def bits2days(bits)
@@ -976,39 +969,7 @@ class ScheduleSummary
         var new_id = util.settings.schedules.next_id()
         webserver.content_send(string.format(html[2], new_id ))
     end
-end
-
-# Displays a list of zones in 'Configure Heating'
-class ZoneSummary
-    def show_zones(html)
-        webserver.content_send(html[0])
-        for z: 1 .. util.settings.zones.size()
-            var info = util.config.get_next_status(z-1).get_info()
-            webserver.content_send(
-                string.format(html[1], z, z, info)
-            )
-        end
-        webserver.content_send(html[2])
-    end
-end
-
-# Displays a web control for editing a single zone
-class ZoneEditor
-    def show_editor(zid, html)
-        var label = util.settings.zones[zid-1]['l']
-        webserver.content_send(string.format(html[0], zid, label))
-        for k: 0 .. util.modes.size()-1
-            var checked = util.settings.zones[zid-1]['m']['c'] == k ? 'checked' : ''
-            var mode = util.modes[k]
-            webserver.content_send(string.format(html[1], mode, k, checked, mode, mode))
-        end
-        webserver.content_send(html[2])
-        webserver.content_send(string.format(html[3], zid-1))
-    end
-end
-
-# Displays a web control for editing a single schedule
-class ScheduleEditor
+    # Displays a web control for editing a single schedule
     def show_editor(id, html)
         var ss = util.settings.schedules
         var s = ss.get(id)
@@ -1030,6 +991,33 @@ class ScheduleEditor
             webserver.content_send(string.format(html[5], id))
         end
         webserver.content_send(html[6])
+    end
+end
+
+# Displays zone sumarry/editor widgets in 'Configure Heating'
+class ZoneGUI
+    # Shows a list of zones with status info
+    def show_zones(html)
+        webserver.content_send(html[0])
+        for z: 1 .. util.settings.zones.size()
+            var info = util.config.get_next_status(z-1).get_info()
+            webserver.content_send(
+                string.format(html[1], z, z, info)
+            )
+        end
+        webserver.content_send(html[2])
+    end
+    # Displays a web control for editing a single zone
+    def show_editor(zid, html)
+        var label = util.settings.zones[zid-1]['l']
+        webserver.content_send(string.format(html[0], zid, label))
+        for k: 0 .. util.modes.size()-1
+            var checked = util.settings.zones[zid-1]['m']['c'] == k ? 'checked' : ''
+            var mode = util.modes[k]
+            webserver.content_send(string.format(html[1], mode, k, checked, mode, mode))
+        end
+        webserver.content_send(html[2])
+        webserver.content_send(string.format(html[3], zid-1))
     end
 end
 
@@ -1120,14 +1108,16 @@ class WebManager : Driver
         webserver.content_start('Configure Heating')
         webserver.content_send_style()
         if webserver.has_arg('id')
-            ScheduleSummary().show_schedules(self.html['sched-sum'])
-            ScheduleEditor().show_editor(int(webserver.arg('id')), self.html['sched'])
+            var gui = ScheduleGUI()
+            gui.show_schedules(self.html['sched-sum'])
+            gui.show_editor(int(webserver.arg('id')), self.html['sched'])
         elif webserver.has_arg('zid')
-            ZoneSummary().show_zones(self.html['zone-sum'])
-            ZoneEditor().show_editor(int(webserver.arg('zid')), self.html['zone'])
+            var gui = ZoneGUI()
+            gui.show_zones(self.html['zone-sum'])
+            gui.show_editor(int(webserver.arg('zid')), self.html['zone'])
         else
-            ZoneSummary().show_zones(self.html['zone-sum'])
-            ScheduleSummary().show_schedules(self.html['sched-sum'])
+            ZoneGUI().show_zones(self.html['zone-sum'])
+            ScheduleGUI().show_schedules(self.html['sched-sum'])
         end
         webserver.content_button(webserver.BUTTON_CONFIGURATION)
         webserver.content_stop()
