@@ -117,10 +117,10 @@ class util
     static colors = [
         '00FF00', # Green
         '800080', # Purple
-        '088F8F', # Dar Cyan
+        '088F8F', # Dark Cyan
         'FF00FF', # Magenta
         '0000FF', # Blue
-        'FFFF00'  # Yello
+        'FFFF00'  # Yellow
     ]
     # Settings are retrieved from persist. Call config.load() to hydrate schedules and zones
     static settings = heating.api.get_persist()
