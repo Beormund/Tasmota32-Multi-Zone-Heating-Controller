@@ -17,6 +17,7 @@
 #  ------------------------------------------------------------------------------------------------------
 
 import string
+import json
 import webserver
 
 var heating = module('heating')
@@ -31,6 +32,21 @@ class tasmota_api
     end
     def time_dump(secs)
         return tasmota.time_dump(secs)
+    end
+    def now()
+        var l = self.rtc()['local']
+        var t = self.time_dump(l)
+        # Add current time as seconds from midnight
+        var sfm = t['hour']*3600+t['min']*60+t['sec']
+        t.setitem('sfm', sfm)
+        # Add local time as unix time 0 (epoch)
+        t.setitem('local', l)
+        return t
+    end
+    # Increments 0-5 by 1 and sets 6 to 0
+    def tomorrow(day)
+        var wd = day != nil ? day : self.now()['weekday']
+        return wd < 6 ? wd+1 : 0
     end
     def cmd(text)
         return tasmota.cmd(text)
@@ -55,11 +71,11 @@ class tasmota_api
     def add_cmd(cmd, func)
         tasmota.add_cmd(cmd, func)
     end
-    def resp_cmnd(json)
-        tasmota.resp_cmnd(json)
+    def resp_cmnd(payload)
+        tasmota.resp_cmnd(payload)
     end
-    def publish_result(json)
-        tasmota.publish_result(json, '')
+    def publish_result(payload)
+        tasmota.publish_result(payload, '')
     end
     def get_persist()
         import persist
@@ -135,7 +151,6 @@ end
 # Used to load html.json from the file system 
 class file
     def load(fn)
-        import json
         import path
         var obj, f
         if path.exists(fn)
@@ -206,7 +221,6 @@ class status
     # Publish this status as an MQTT message
     def pub_mqtt()
         if !heating.options.use_mqtt return end
-        import json
         heating.api.publish_result(json.dump(self._tomap()))
     end
     # Log info with the BRY: prefix
@@ -234,18 +248,15 @@ class status
             : heating.api.strftime('%R', secs)
     end
     # Calls string.format with varying args
-    def _call(detailed, *args)
+    def _call(d, *args)
+        var label = util.settings.zones.get_label(self.zone)
+        var power = self.power ? 'on' : 'off'
         if self.mode == 2 || self.mode == 3
-            return string.format(
-                '%s Const %s', 
-                util.settings.zones[self.zone]['l'], 
-                self.power ? 'on' : 'off'
-            )
+            return string.format('%s Const %s', label, power)
         else
-            var t = self._getdt(self.expiry, detailed)
-            args.insert(1, util.settings.zones[self.zone]['l'])
-            args.push(self.power ? 'on' : 'off')
-            args.push(t)
+            args.insert(1, label)
+            args.push(power)
+            args.push(self._getdt(self.expiry, d))
             return call(string.format, args)
         end
     end
@@ -254,7 +265,7 @@ class status
         return {
             "Heating": {
                 "Zone": self.zone + 1,
-                "Label": util.settings.zones[self.zone]['l'],
+                "Label": util.settings.zones.get_label(self.zone),
                 "Mode": util.modes[self.mode],
                 "Power": self.power ? 'On' : 'Off',
                 "Until": self._getdt(self.expiry, true)
@@ -331,7 +342,13 @@ class zones: list
     def set_zone(zone, mode, power, expiry)
         self.set_mode(zone, mode)
         self.set_power(zone, power, mode)
-        self.set_expiry(zone, expiry ? expiry : 0)
+        if expiry
+            self.set_expiry(zone, expiry)
+        end
+    end
+    # Gets the custom name for the zone
+    def get_label(zone)
+        return self[zone]['l']
     end
     # Sets a custom name for a zone
     def set_label(zone, label)
@@ -345,6 +362,12 @@ class zones: list
     def set_expiry(zone, expiry)
         self[zone]['e'] = expiry
     end
+    def get_status(z)
+        var m = self.get_mode(z)
+        var p = self.get_power(z, m)
+        var e = self.get_expiry(z)
+        return status(z, m, p, e)
+    end
 end
 
 # A schedule can specify switching times for 1 or more zones
@@ -355,6 +378,7 @@ end
 # schedule['d'] = Days (Sun = 1 << 0, Mon = 1 << 1 etc)
 # schedule['z'] = Zones (ZN1 = 1 << 0, ZN2 = 1 << 1 etd)
 class schedule: map
+    static on = '1', off = '0', id = 'i', days = 'd', zones = 'z'
     def init(m)
         super(self).init()
         m = isinstance(m, map) ? m : {"i":0, "1":0, "0":0, "d":0, "z":0}
@@ -379,54 +403,28 @@ class schedule: map
         var mins = (secs/60)%60
         return string.format('%02d:%02d', hours, mins)
     end
-    # Converts a time map to seconds from midnight
-    # {'hour': 10, "min": 15, "sec": 0}
-    def time2secs(t)
-        return t['hour']*3600+t['min']*60+t['sec']
-    end
-    # Increments day 0 to 5 by 1 and day 6 (Sat) to 0 (Sun)
-    def tomorrow(wd)
-        return wd < 6 ? wd+1 : 0
-    end
-    # Gets local time map.
-    # Adds 'sfm' (seconds from midnight)
-    # Adds 'local' (local time in seconds)
-    def now()
-        var l = heating.api.rtc()['local']
-        var t = heating.api.time_dump(l)
-        # Fix for when timers fire a few millis too early
-        if t['sec'] == 59 
-            l+=1
-            t =  heating.api.time_dump(l)
-        end
-        t.setitem('sfm', self.time2secs(t))
-        t.setitem('local', l)
-        return t
-    end
     # Calculates the next on/off run time in seconds
-    def get_runat(t)
-        if !self['d'] return 0 end
-        var n = self.now()
-        var past = t <= n['sfm'] ? 1 : 0
-        var d = past 
-            ? self.tomorrow(n['weekday']) 
-            : n['weekday'], i = past
-        while !self.is_set('d', d)
-            d = self.tomorrow(d) i+=1
+    def get_runat(_t)
+        if !self[self.days] return 0 end
+        var t = self[_t]
+        var now = heating.api.now()
+        var sfm = now['sfm']
+        var p = t <= sfm ? 1 : 0
+        var day = p ? heating.api.tomorrow() : now['weekday'] 
+        while !self.is_set(self.days, day)
+            day = heating.api.tomorrow(day) 
+            p+=1
         end
-        return (past
-            ? 86400*(!i?1:i)-(n['sfm']-t)
-            : 86400*i+t-n['sfm'])
-            +n['local']
+        return (p?86400*p-(sfm-t):t-sfm) + now['local']
     end
     # Calculates if the current schedule is on or off
     def is_running(zone)
-        var n = self.now()
-        if self.is_set('d', n['weekday'])
-            if zone != nil && !self.is_set('z', zone)
+        var n = heating.api.now()
+        if self.is_set(self.days, n['weekday'])
+            if zone != nil && !self.is_set(self.zones, zone)
                 return false
             end
-            if self['1'] <= n['sfm'] && n['sfm'] < self['0']
+            if self[self.on] <= n['sfm'] && n['sfm'] < self[self.off]
                 return true
             end
         end
@@ -458,13 +456,13 @@ class schedules : list
     end
     # list.push overridden to take a schedule
     def push(schedule)
-        schedule['i'] = self.next_id()
+        schedule[schedule.id] = self.next_id()
         super(self).push(schedule)
     end
     # list.pop overridden to remove schedule by id
     def pop(id)
         for s: 0 .. self.size()-1
-            if self[s]['i'] == id
+            if self[s][schedule.id] == id
                super(self).pop(s)
                break 
             end
@@ -474,14 +472,14 @@ class schedules : list
     # Convenience method to get a schedule by id
     def get(id)
         for s: self
-            if s['i'] == id
+            if s[s.id] == id
                 return s
             end
         end
     end
     # Updates a schedule using schedule param
     def update(updated)
-        var current = self.get(updated['i'])
+        var current = self.get(updated[updated.id])
         if current && current == updated
             return false
         end
@@ -495,9 +493,9 @@ class schedules : list
         import math
         var i = math.imax
         for s: self
-            if s.is_set('z', zone)
+            if s.is_set(s.zones, zone)
                 var p = s.is_running()
-                var r = s.get_runat(s[p?'0':'1'])
+                var r = s.get_runat(p ? s.off : s.on)
                 if p return status(zone, 0, true, r)
                 else i = r < i ? r : i end
             end
@@ -506,48 +504,38 @@ class schedules : list
     end
     # Gets the schedule with the earliest on time for day
     def get_first_on(zone, day)
-        var f = / a,b -> a['1'] < b['1']
+        var f = / a,b -> a[a.on] < b[b.off]
         return self.get_day_onoff(zone, f, day)
     end
     # Gets the schedule with the latest off time for day
     def get_last_off(zone, day)
-        var f = / a,b -> a['0'] > b['0']
+        var f = / a,b -> a[a.off] > b[b.off]
         return self.get_day_onoff(zone, f, day)
     end
     # Returns the first on and last off schedules for day
     def get_daytime(zone, day)
         return {
-            "on": self.get_first_on(zone, day), 
-            "off": self.get_last_off(zone, day)
+            "start": self.get_first_on(zone, day), 
+            "finish": self.get_last_off(zone, day)
         }
-    end
-    # Gets the current weekday (0-6)
-    def get_today()
-        var ls = heating.api.rtc()['local']
-        return int(heating.api.strftime('%w', ls))
-    end
-    # Increments 0-5 by 1 and sets 6 to 0
-    def get_next_day(day)
-        var wd = day != nil ? day : self.get_today()
-        return wd < 6 ? wd+1 : 0
     end
     # Gets the next day's first on schedule
     def get_next_first_on(zone, day)
-        return self.get_first_on(zone, self.get_next_day(day))
+        return self.get_first_on(zone, heating.api.tomorrow(day))
     end
     # Retrieves the first on or last off schedule for day
     def get_day_onoff(zone, f, day)
         if self.size() == 0 return end
-        var wd = day != nil ? day : self.get_today()
+        var wd = day != nil ? day : heating.api.now()['weekday']
         var l = 0, t = nil
         while l < 7 && !t
             for s: self
-                if s.is_set('z', zone) && s.is_set('d', wd)
+                if s.is_set(s.zones, zone) && s.is_set(s.days, wd)
                     t = !t ? s : t
                     t = f(s,t) ? s : t
                 end
             end
-            l+=1 wd = self.get_next_day(wd)
+            l+=1 wd = heating.api.tomorrow(wd)
         end
         return t
     end
@@ -558,22 +546,19 @@ class schedules : list
     # Used to reset all schedule ids when list changes
     def reindex()
         for i: 0 .. self.size()-1
-            self[i]['i'] = i+1
+            self[i][schedule.id] = i+1
         end
     end
 end
 
-# loads and ccntrols access to zones and schedules
+# Configures zones, schedules and labels
 class config
-    # Returns a schedule status if zone's mode is auto
-    # Returns an override status if zone is in override
     def get_next_status(zone)
-        var mode = util.settings.zones.get_mode(zone)
-        if mode
-            var power = util.settings.zones.get_power(zone, true)
-            var expiry = util.settings.zones.get_expiry(zone)            
-            return status(zone, mode, power, expiry)
+        if util.settings.zones.get_mode(zone)
+            # Return a zone status if mode is in override
+            return util.settings.zones.get_status(zone)
         else
+            # Return a schedule status if mode is auto
             return util.settings.schedules.get_next_status(zone)
         end
     end
@@ -618,13 +603,13 @@ class config
         if diff > 0 # Need to truncate...
             util.settings.zones.resize(heating.options.zones)
             for s: util.settings.schedules
-                s['z'] = s['z'] >> diff
+                s[s.zones] = s[s.zones] >> diff
             end
         elif diff < 0 # Need to append
             for i: util.settings.zones.size()+1 .. heating.options.zones
                 self.add_zone('ZN' .. i)
                 for s: util.settings.schedules
-                    s['z'] = (s['z']<<diff)|((1<<diff)-1)
+                    s[s.zones] = (s[s.zones]<<diff)|((1<<diff)-1)
                 end
             end
         end
@@ -650,13 +635,13 @@ class scheduler
     end
     def set_timer(s)
         # Get the time now in seconds
-        var now = s.now()['local']
+        var now = heating.api.rtc()['local']
         # Is the schedule switching on or off?
         var power = s.is_running()
         # Get the next run time depending on power state
-        var runat = s.get_runat(s[power ? '0' : '1'])
-        # Timers are set in millis
-        var millis = (runat - now) * 1000
+        var runat = s.get_runat(power ? s.off : s.on)
+        # Timers are set in millis (add 1 second safety margin)
+        var millis = (runat + 1 - now) * 1000
         # Call on_pop when the timer expires
         heating.api.set_timer(millis, / -> self.on_pop(s), 'schedule')
     end
@@ -722,52 +707,24 @@ end
 
 # Used to create timers for override boost and minute ticker for displaying time
 class clock
-    var running, handler, id, repeat, func
-    def init(handler, func, id, repeat)
-        self.running = false
-        self.handler = handler
-        self.func = func
-        self.id = id
-        self.repeat = repeat!=nil ? repeat : true
+    var repeat
+    def init(r)
+        self.repeat = r != nil ? r : true
     end
-    def local()
-        return heating.api.time_dump(heating.api.rtc()['local'])
+    def start(h, f, id)
+        self.tick(h, f, id)
     end
-    def millis() 
-        var f = self.func
-        return f(self.local())
-    end 
-    def start()
-        self.running = true
-        self.tick()
-    end
-    def tick()
+    def tick(h, f, id)
         heating.api.set_timer(
-            self.millis(),
-            / -> self.pop(),
-            self.id
+            f(heating.api.now()), 
+            / -> self.pop(h, f, id)
+            , id
         )
     end
-    def pop()
-        if !self.running return end
-        self.handler.callback()
+    def pop(h, f, id)
+        h()
         if !self.repeat return end
-        self.tick()
-    end
-    def stop()
-        self.running = false
-    end
-end
-
-# Handler for override boost mode
-class clock_handler
-    var func
-    def init(func)
-        self.func = func
-    end
-    def callback()
-        var f = self.func
-        f()
+        self.tick(h, f, id)
     end
 end
 
@@ -801,7 +758,7 @@ class override
     end
     # Set the relay power state and log/display message for zone
     def on_completed(zone)
-        var stat = util.config.get_next_status(zone)
+        var stat = util.settings.zones.get_status(zone)
         heating.api.set_power(zone, stat.power)
         # Update logs, LED, MQTT and LCD screen
         stat.notify()
@@ -811,10 +768,11 @@ class override
     # turn zone on if off for duration or extend time if on.
     def boost(zone, secs)
         var id = 'boost' .. zone
-        var handler = clock_handler(/ -> self.on_boost_end(zone))
-        var func = / -> !secs ? 3600000 : secs * 1000
-        self.clocks[id] = clock(handler, func, id, false)
-        self.clocks[id].start()
+        var h = / -> self.on_boost_end(zone)
+        var f = / -> !secs ? 3600000 : secs * 1000
+        var repeat = false
+        self.clocks[id] = clock(repeat)
+        self.clocks[id].start(h, f, id)
         var expiry = (!secs ? 3600 : secs) + heating.api.rtc()['local']
         util.settings.zones.set_zone(zone, 1, true, expiry)
     end
@@ -832,20 +790,18 @@ class override
         util.settings.zones.set_expiry(zone, 0)
         heating.api.log(string.format(
             'BRY: %s boost off', 
-            util.settings.zones[zone]['l'])
+            util.settings.zones.get_label(zone))
         )
     end
     # Toggle zone state
     def advance(zone)
         var stat = util.settings.schedules.get_next_status(zone)
-        var power = !stat.power
-        var expiry = stat.expiry
-        util.settings.zones.set_zone(zone, 4, power, expiry)
+        util.settings.zones.set_zone(zone, 4, !stat.power, stat.expiry)
     end
     # Swtich zone to timer mode
     def auto(zone)
-        var power = util.settings.zones.get_power(zone)
-        util.settings.zones.set_zone(zone, 0, power)
+        var stat = util.settings.schedules.get_next_status(zone)
+        util.settings.zones.set_zone(zone, 0, stat.power, stat.expiry)
     end
     # Switch zone permanently on
     def on(zone)
@@ -858,29 +814,29 @@ class override
     # Switch zone on from first 'ON' time until last 'OFF' time 
     def day(zone, _dt)
         var dt = _dt ? _dt : util.settings.schedules.get_daytime(zone)
-        if !dt['on'] || !dt['off'] 
+        var start = dt['start'], finish = dt['finish']
+        if !start || !finish 
             self.set(zone, 0)
             return
         end
-        var n = dt['on'].now()
-        var on = dt['on'].get_runat(dt['on']['1'])
-        var off = dt['off'].get_runat(dt['off']['0'])
+        var n = heating.api.now()
+        var on = start.get_runat(start.on)
+        var off = finish.get_runat(finish.off)
         var power = (on > off || on <= n['local']) && n['local'] <= off
         var expiry
-        if power 
-            expiry = off
-        elif n['sfm'] < dt['on']['1']
-            expiry = on
-        elif n['sfm'] > dt['off']['0']
+        if power expiry = off
+        elif n['sfm'] < start[start.on] expiry = on
+        elif n['sfm'] > finish[finish.off]
             var nfo = util.settings.schedules.get_next_first_on(zone, n['weekday'])
-            expiry = nfo.get_runat(nfo['1'])
+            expiry = nfo.get_runat(nfo.on)
         end
         util.settings.zones.set_zone(zone, 5, power, expiry)
     end
     # Used by scheduler to test if schedule matches day first on or last off time
     def check_day(zone, s, power)
         var dt = util.settings.schedules.get_daytime(zone)
-        if power ? dt['on']['i'] == s['i'] : dt['off']['i'] == s['i']
+        var start = dt['start'], finish = dt['finish']
+        if power ? start[start.id] == s[s.id] : finish[finish.id] == s[s.id]
             self.day(zone, dt)
             return true
         end
@@ -890,7 +846,7 @@ class override
         for zone: 0 .. util.settings.zones.size()-1
             var mode = util.settings.zones.get_mode(zone)
             if mode == 1 && !self.clocks.find('boost' .. zone)
-                var expiry = util.settings.zones[zone]['e'] - heating.api.rtc()['local']
+                var expiry = util.settings.zones.get_expiry(zone) - heating.api.rtc()['local']
                 self.set(zone, mode, expiry)
             elif mode  > 1
                 self.set(zone, mode)
@@ -950,20 +906,22 @@ class ScheduleGUI
     def show_schedules(html)
         webserver.content_send(html[0])
         for s: util.settings.schedules
-            var day_indices = self.bits2days(s['d'])
+            var day_indices = self.bits2days(s[s.days])
             var grouped_days = self.group_days(day_indices)
             var day_str = self.concat_days(grouped_days)
             var zone_str = ''
             for z: 0 .. util.settings.zones.size()-1
-                if !s.is_set('z', z) continue end
-                zone_str += util.settings.zones[z]['l']
+                if !s.is_set(s.zones, z) continue end
+                zone_str += util.settings.zones.get_label(z)
                 if z < util.settings.zones.size()-1
                     zone_str += ' '
                 end
             end
             webserver.content_send(
-                string.format(html[1], 
-                s['i'], s['i'], s.secs2str(s['1']), s.secs2str(s['0']), day_str, zone_str)
+                string.format(
+                    html[1], s[s.id], s[s.id], s.secs2str(s[s.on]), 
+                    s.secs2str(s[s.off]), day_str, zone_str
+                )
             )
         end
         var new_id = util.settings.schedules.next_id()
@@ -975,15 +933,15 @@ class ScheduleGUI
         var s = ss.get(id)
         var action = s ? 'update' : 'new'
         s = s ? s : schedule()
-        webserver.content_send(string.format(html[0], id, s.secs2str(s['1']), s.secs2str(s['0'])))
+        webserver.content_send(string.format(html[0], id, s.secs2str(s[s.on]), s.secs2str(s[s.off])))
         for d: 0 .. util.days.size()-1
-            var checked = s.is_set('d', d) ? 'checked' : ''
+            var checked = s.is_set(s.days, d) ? 'checked' : ''
             var dl = util.days[d]
             webserver.content_send(string.format(html[1], dl, 1 << d, checked, dl, dl))
         end
         webserver.content_send(html[2])
         for z: 0 .. util.settings.zones.size()-1
-            var checked = s.is_set('z', z) ? 'checked' : '', zl = util.settings.zones[z]['l']
+            var checked = s.is_set(s.zones, z) ? 'checked' : '', zl = util.settings.zones.get_label(z)
             webserver.content_send(string.format(html[3], zl, 1 << z, checked, zl, zl))
         end
         webserver.content_send(string.format(html[4], action, id))
@@ -1000,7 +958,7 @@ class ZoneGUI
     def show_zones(html)
         webserver.content_send(html[0])
         for z: 1 .. util.settings.zones.size()
-            var info = util.config.get_next_status(z-1).get_info()
+            var info = util.settings.zones.get_status(z-1).get_info()
             webserver.content_send(
                 string.format(html[1], z, z, info)
             )
@@ -1009,10 +967,10 @@ class ZoneGUI
     end
     # Displays a web control for editing a single zone
     def show_editor(zid, html)
-        var label = util.settings.zones[zid-1]['l']
+        var label = util.settings.zones.get_label(zid-1)
         webserver.content_send(string.format(html[0], zid, label))
         for k: 0 .. util.modes.size()-1
-            var checked = util.settings.zones[zid-1]['m']['c'] == k ? 'checked' : ''
+            var checked = util.settings.zones.get_mode(zid-1) == k ? 'checked' : ''
             var mode = util.modes[k]
             webserver.content_send(string.format(html[1], mode, k, checked, mode, mode))
         end
@@ -1036,18 +994,18 @@ class WebManager : Driver
     end
     # Hydrate a schedule object for a new/update action
     def fill_schedule(id, s)
-        s['i'] = id
+        s[s.id] = id
         for arg: 0 .. webserver.arg_size()-2
             var name = webserver.arg_name(arg)
             var value = webserver.arg(arg)
             if name == 'days[]'
-                s['d'] += int(value)
+                s[s.days] += int(value)
             elif name == 'zones[]'
-                s['z'] += int(value)
+                s[s.zones] += int(value)
             elif name == 'on'
-                s['1'] = s.str2secs(value)
+                s[s.on] = s.str2secs(value)
             elif name == 'off'
-                s['0'] = s.str2secs(value)
+                s[s.off] = s.str2secs(value)
             end
         end           
     end
@@ -1056,11 +1014,11 @@ class WebManager : Driver
         var id = int(webserver.arg('zone'))
         if webserver.has_arg('label')
             var label = webserver.arg('label')
-            if size(label) > 0 && label != util.settings.zones[id]['l']
+            if size(label) > 0 && label != util.settings.zones.get_label(id)
                 util.settings.zones.set_label(id, label)
                 # Update the display to reflect the new label
                 if util.lcd
-                    util.config.get_next_status(id).set_lcd()
+                    util.settings.zones.get_status(id).set_lcd()
                 end
                 # Sync webbuttons if option set
                 if heating.options.sync_webbuttons
@@ -1153,15 +1111,12 @@ class HeatingController
         # If sync_webbuttons is set, update relay toggle buttons
         if heating.options.sync_webbuttons
             for z: 0 .. util.settings.zones.size()-1
-                util.config.set_webbutton(z+1, util.settings.zones[z]['l'])
+                util.config.set_webbutton(z+1, util.settings.zones.get_label(z))
             end
         end
         # If use_lcd is set, create a minute ticker to display the time
         if heating.options.use_lcd
             util.lcd = screen() 
-            var f = / now -> 60000-now['sec']*1000
-            var handler = clock_handler(/ -> util.lcd.update_clock())
-            self.ticker = clock(handler, f, 'ticker')
         end
         # Create the override capability
         util.override = override()
@@ -1214,14 +1169,16 @@ class HeatingController
         if util.lcd
             util.lcd.clear_line(1)
             util.lcd.update_clock()
-            self.ticker.start()
+            var h = / -> util.lcd.update_clock()
+            var f = / now -> 60000-now['sec']*1000
+            self.ticker = clock()
+            self.ticker.start(h, f, 'ticker')
         end
     end
     # When MQTT connects send heating status for all zones
     def mqtt_connected()
-        import json
         for z: 0 .. util.settings.zones.size()-1
-            util.config.get_next_status(z).pub_mqtt()
+            util.settings.zones.get_status(z).pub_mqtt()
         end
     end
     # Handler for physical buttons
@@ -1267,16 +1224,16 @@ class HeatingController
         heating.api.resp_cmnd(string.format('{"%s": "DONE"}', message))
     end
     # Change the operating mode for the zone if different from current mode
-    def cmd_set_mode(zone, mode, json)
-        if !json.has('mode') return end
-        if type(json['mode']) != 'int' return end
-        var to_mode = json['mode']
+    def cmd_set_mode(zone, mode, payload)
+        if !payload.has('mode') return end
+        if type(payload['mode']) != 'int' return end
+        var to_mode = payload['mode']
         if to_mode < 0 || to_mode > 5 return end
         if to_mode == mode return end
         if to_mode == 1
-            if !json.has('hours') return end
-            if type(json['hours']) != 'int' return end
-            var hours = json['hours']
+            if !payload.has('hours') return end
+            if type(payload['hours']) != 'int' return end
+            var hours = payload['hours']
             if hours  == 1 || hours == 2
                 util.override.set(zone, to_mode, hours * 3600)
             end                                   
