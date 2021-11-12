@@ -491,7 +491,7 @@ class schedules : list
         var i = math.imax
         for s: self
             if s.is_set(s.zones, zone)
-                var p = s.is_running()
+                var p = s.is_running(zone)
                 var r = s.get_runat(p ? s.off : s.on)
                 if p 
                     return status(zone, 0, true, r)
