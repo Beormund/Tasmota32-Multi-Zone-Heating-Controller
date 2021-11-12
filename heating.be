@@ -36,14 +36,11 @@ class tasmota_api
     def now()
         var l = self.rtc()['local']
         var t = self.time_dump(l)
-        # Add current time as seconds from midnight
         var sfm = t['hour']*3600+t['min']*60+t['sec']
         t.setitem('sfm', sfm)
-        # Add local time as unix time 0 (epoch)
         t.setitem('local', l)
         return t
     end
-    # Increments 0-5 by 1 and sets 6 to 0
     def tomorrow(day)
         var wd = day != nil ? day : self.now()['weekday']
         return wd < 6 ? wd+1 : 0
@@ -406,27 +403,27 @@ class schedule: map
     # Calculates the next on/off run time in seconds
     def get_runat(_t)
         if !self[self.days] return 0 end
-        var t = self[_t]
+        var t = self[_t] # _t is '1' (on) or '0' (off)
         var now = heating.api.now()
-        var sfm = now['sfm']
-        var p = t <= sfm ? 1 : 0
-        var day = p ? heating.api.tomorrow() : now['weekday'] 
-        while !self.is_set(self.days, day)
-            day = heating.api.tomorrow(day) 
-            p+=1
+        var sfm = now['sfm'] # Now as secs from midnight
+        var wd = now['weekday'] # Today [0 .. 6]
+        var i = t <= sfm ? 1 : 0 # Has on/off time past?
+        var day = i ? heating.api.tomorrow(wd) : wd 
+        while !self.is_set(self.days, day) i+=1
+            day = heating.api.tomorrow(day)            
         end
-        return (p?86400*p-(sfm-t):t-sfm) + now['local']
+        return ( i ? 86400*i-(sfm-t) : t-sfm) + now['local']
     end
     # Calculates if the current schedule is on or off
     def is_running(zone)
         var n = heating.api.now()
+        var sfm = n['sfm']
         if self.is_set(self.days, n['weekday'])
-            if zone != nil && !self.is_set(self.zones, zone)
-                return false
-            end
-            if self[self.on] <= n['sfm'] && n['sfm'] < self[self.off]
-                return true
-            end
+            if zone != nil && self.is_set(self.zones, zone)
+                if self[self.on] <= sfm && sfm < self[self.off]
+                    return true
+                end
+            end            
         end
         return false
     end
@@ -496,8 +493,11 @@ class schedules : list
             if s.is_set(s.zones, zone)
                 var p = s.is_running()
                 var r = s.get_runat(p ? s.off : s.on)
-                if p return status(zone, 0, true, r)
-                else i = r < i ? r : i end
+                if p 
+                    return status(zone, 0, true, r)
+                else 
+                    i = r < i ? r : i 
+                end
             end
         end
         return status(zone, 0, false, i)
@@ -528,14 +528,14 @@ class schedules : list
         if self.size() == 0 return end
         var wd = day != nil ? day : heating.api.now()['weekday']
         var l = 0, t = nil
-        while l < 7 && !t
+        while (l < 7 && !t) l+=1 
             for s: self
                 if s.is_set(s.zones, zone) && s.is_set(s.days, wd)
                     t = !t ? s : t
                     t = f(s,t) ? s : t
                 end
             end
-            l+=1 wd = heating.api.tomorrow(wd)
+            wd = heating.api.tomorrow(wd)
         end
         return t
     end
