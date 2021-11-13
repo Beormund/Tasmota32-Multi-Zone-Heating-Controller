@@ -419,10 +419,11 @@ class schedule: map
         var n = heating.api.now()
         var sfm = n['sfm']
         if self.is_set(self.days, n['weekday'])
-            if zone != nil && self.is_set(self.zones, zone)
-                if self[self.on] <= sfm && sfm < self[self.off]
-                    return true
-                end
+            if zone != nil && !self.is_set(self.zones, zone)
+                return false
+            end
+            if self[self.on] <= sfm && sfm < self[self.off]
+                return true
             end            
         end
         return false
@@ -641,7 +642,7 @@ class scheduler
         # Get the next run time depending on power state
         var runat = s.get_runat(power ? s.off : s.on)
         # Timers are set in millis (add 1 second safety margin)
-        var millis = (runat + 1 - now) * 1000
+        var millis = (runat+1 - now) * 1000
         # Call on_pop when the timer expires
         heating.api.set_timer(millis, / -> self.on_pop(s), 'schedule')
     end
@@ -668,7 +669,7 @@ class scheduler
         # Check each zone for the schedule
         for zone: 0 .. util.settings.zones.size()-1
             # Is the zone set for this schedule?
-            if !s.is_set('z', zone) continue end
+            if !s.is_set(s.zones, zone) continue end
             # What mode is the zone in?
             var mode = util.settings.zones.get_mode(zone)
             if mode == 0 # Auto
