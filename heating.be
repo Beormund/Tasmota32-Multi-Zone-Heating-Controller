@@ -235,9 +235,6 @@ class status
         self.pub_mqtt()
         self.set_lcd()
     end
-
-    #------------------internal methods--------------------#
-
     # Short time: 16:30; Detailed time: 16:30 Mon 18 Oct 21
     def _getdt(secs, detailed)
         return detailed 
@@ -274,21 +271,13 @@ end
 # This class represents a single heating zone
 # zone['l'] = label
 # zone['e'] = expiry
-# zone['m'] = mode (previous or current)
-# zone['m']['p'] = previous mode
-# zone['m']['c'] = current mode
-# zone['p'] = power (schedule or override)
-# zone['p']['s'] = schedule power
-# zone['p']['o'] = override power
+# zone['m'] = mode (6 bit for previous & current)
+# zone['p'] = power (2 bit for auto & override)
 class zone: map
+    static label = 'l', expiry = 'e', mode = 'm', power = 'p'
     def init(o)
         super(self).init()
-        o = isinstance(o, map) ? o : {
-            "l": o, 
-            "e": 0, 
-            "m": {"p": 0, "c": 0}, 
-            "p": {"s": false, "o": false}
-        }
+        o = isinstance(o, map) ? o : {"l": o ,"e": 0, "m": 0, "p": 0}
         for k: o.keys()
             self[k] = o[k]
         end
@@ -304,31 +293,32 @@ class zones: list
                 self.push(zone(z))
             end
         end
-    end
+    end    
     # Returns a zone's power state. 
-    def get_power(zone, override)
-        var item = override ? 'o' : 's'
-        return self[zone]['p'][item]
+    def get_power(z, m)
+        return !!((self[z][zone.power] >> int(!m)) & 1)
     end
-    # Sets the power state for a given zone.
-    # If mode > 0 then set the override power state
-    def set_power(zone, power, mode)
-        self[zone]['p'][mode ? 'o' : 's'] = power
-        if mode == 0
-            self[zone]['p']['o'] = false
+
+    def set_power(z, p, m)
+        # Compiler bug; should be int(!m)
+        self[z][zone.power] ^= (-int(p) ^ 
+        self[z][zone.power]) & (1 << int(m?false:true)) 
+        if m == 0
+            self[z][zone.power] &= ~(1 << 0)
         end
     end
     # Gets the mode for a given zone
     # If previous is true return the previous mode
-    def get_mode(zone, previous)
-        return self[zone]['m'][previous ? 'p' : 'c']
+    def get_mode(z, p)
+        var lsb = p ? 3 : 0, msb = lsb + 2
+        return (self[z][zone.mode] >> lsb) & ~(~0 << (msb-lsb+1))
     end
     # Set the mode for a given zone
-    def set_mode(zone, mode)
-        var current = self[zone]['m']['c']
-        if current != mode
-            self[zone]['m']['p'] = current
-            self[zone]['m']['c'] = mode
+    def set_mode(z, m)
+        var current = self.get_mode(z)
+        if current != m
+            self[z][zone.mode] <<= 3
+            self[z][zone.mode] += m
         end
     end
     # Configures a new zone and adds it to the list of zones
@@ -336,28 +326,28 @@ class zones: list
         self.push(zone(l))
     end
     # Sets a zone's mode, power and expiry
-    def set_zone(zone, mode, power, expiry)
-        self.set_mode(zone, mode)
-        self.set_power(zone, power, mode)
-        if expiry
-            self.set_expiry(zone, expiry)
+    def set_zone(z, m, p, e)
+        self.set_mode(z, m)
+        self.set_power(z, p, m)
+        if e
+            self.set_expiry(z, e)
         end
     end
     # Gets the custom name for the zone
-    def get_label(zone)
-        return self[zone]['l']
+    def get_label(z)
+        return self[z][zone.label]
     end
     # Sets a custom name for a zone
-    def set_label(zone, label)
-        self[zone]['l'] = label
+    def set_label(z, l)
+        self[z][zone.label] = l
     end
     # Gets the next run time or expiry in seconds for a zone
-    def get_expiry(zone)
-        return self[zone]['e']
+    def get_expiry(z)
+        return self[z][zone.expiry]
     end
     # Sets a zone's next run time or expiry time
-    def set_expiry(zone, expiry)
-        self[zone]['e'] = expiry
+    def set_expiry(z, e)
+        self[z][zone.expiry] = e
     end
     def get_status(z)
         var m = self.get_mode(z)
