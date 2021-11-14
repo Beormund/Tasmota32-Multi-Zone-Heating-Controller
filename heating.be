@@ -314,11 +314,13 @@ class zones: list
         return (self[z][zone.mode] >> lsb) & ~(~0 << (msb-lsb+1))
     end
     # Set the mode for a given zone
+    # Compiler bug with recursive method access with statics
+    # Should be self[z][zone.mode]
     def set_mode(z, m)
         var current = self.get_mode(z)
         if current != m
-            self[z][zone.mode] <<= 3
-            self[z][zone.mode] += m
+            self[z]['m'] = current << 3
+            self[z]['m'] += m
         end
     end
     # Configures a new zone and adds it to the list of zones
