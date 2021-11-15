@@ -294,33 +294,29 @@ class zones: list
             end
         end
     end    
-    # Returns a zone's power state. 
+    # Returns a zone's power state 
     def get_power(z, m)
         return !!((self[z][zone.power] >> int(!m)) & 1)
     end
-
+    # Sets a zone's power state
     def set_power(z, p, m)
-        # Compiler bug; should be int(!m)
         self[z][zone.power] ^= (-int(p) ^ 
-        self[z][zone.power]) & (1 << int(m?false:true)) 
+        self[z][zone.power]) & (1 << int(!m)) 
         if m == 0
             self[z][zone.power] &= ~(1 << 0)
         end
     end
     # Gets the mode for a given zone
-    # If previous is true return the previous mode
     def get_mode(z, p)
         var lsb = p ? 3 : 0, msb = lsb + 2
         return (self[z][zone.mode] >> lsb) & ~(~0 << (msb-lsb+1))
     end
     # Set the mode for a given zone
-    # Compiler bug with recursive method access with statics
-    # Should be self[z][zone.mode]
     def set_mode(z, m)
         var current = self.get_mode(z)
         if current != m
-            self[z]['m'] = current << 3
-            self[z]['m'] += m
+            self[z][zone.mode] = current << 3
+            self[z][zone.mode] += m
         end
     end
     # Configures a new zone and adds it to the list of zones
