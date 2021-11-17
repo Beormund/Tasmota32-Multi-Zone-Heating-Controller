@@ -596,7 +596,7 @@ class config
             end
         elif diff < 0 # Need to append
             for i: util.settings.zones.size()+1 .. heating.options.zones
-                self.add_zone('ZN' .. i)
+                util.settings.zones.add_zone('ZN' .. i)
                 for s: util.settings.schedules
                     s[s.zones] = (s[s.zones]<<diff)|((1<<diff)-1)
                 end
