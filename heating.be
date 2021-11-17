@@ -672,10 +672,9 @@ class scheduler
                 # If schedule matches first on/last off, update power, expriry etc
                 if util.override.check_day(zone, s, power) 
                     self.on_completed(zone)
-                else
-                    # If the current schedule doesn't match update schedule power
-                    util.settings.zones.set_power(zone, power)
                 end
+                # Update schedule power
+                util.settings.zones.set_power(zone, power)
             end
         end
         # Force the updated configuration to be saved to flash
