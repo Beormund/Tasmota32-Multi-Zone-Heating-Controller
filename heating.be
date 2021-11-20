@@ -23,7 +23,7 @@ import global
 
 var heating = module('heating')
 
-# All tasmota api calls are accessed via tasmota_api
+# All tasmota api calls are accessed via heating.api
 class tasmota_api
     def strftime(format, secs)
         return tasmota.strftime(format, secs)
@@ -59,8 +59,10 @@ class tasmota_api
         tasmota.remove_timer(id)
     end
     def set_power(zone, power)
-        if tasmota.get_power()[zone] != power
-            tasmota.set_power(zone, power)
+        if self.get_relay_count() > zone
+            if tasmota.get_power()[zone] != power
+                tasmota.set_power(zone, power)
+            end
         end
     end
     def add_rule(trigger, func)
@@ -81,6 +83,13 @@ class tasmota_api
     def get_persist()
         import persist
         return persist
+    end
+    def get_relay_count()
+        def pin(t, enum)
+            while gpio.pin(enum, t) != -1 t+=1 end
+            return t
+        end
+        return pin(0, gpio.REL1) + pin(0, gpio.REL1_INV)
     end
 end
 
@@ -620,7 +629,9 @@ class config
         end
     end
     # If sync_webbuttons is true set the relay toggle button to label
-    def set_webbutton(btn, label)       
+    def set_webbutton(btn, label)
+        # Don't set the quasi Light/WS2812 button; only relays...
+        if btn > heating.api.get_relay_count() return end 
         heating.api.cmd(string.format('webbutton%d %s', btn, label))
     end
     def set_webbuttons()
@@ -637,13 +648,6 @@ class config
     # E.g., set_option(options.MQTT, true)
     def set_option(opt, set)
         util.settings.options ^= (-int(set) ^ util.settings.options) & opt
-    end
-    def get_relay_count()
-        def pin(t, enum)
-            while gpio.pin(enum, t) != -1 t+=1 end
-            return t
-        end
-        return pin(0, gpio.REL1) + pin(0, gpio.REL1_INV)
     end
     # If LCD option is set, enable the screen
     def enable_display()
@@ -681,7 +685,7 @@ class config
             util.settings.zones = zones(util.settings.zones)
         else
             util.settings.zones = zones()
-            for i: 1 .. self.get_relay_count()
+            for i: 1 .. heating.api.get_relay_count()
                 util.settings.zones.push(zone('ZN' .. i))
             end
         end
@@ -1073,6 +1077,10 @@ class WebManager : Driver
             end
         end
         if webserver.has_arg('delete')
+            # Check boost.If active cancel...
+            if util.settings.zones.get_mode(id) == 1
+                util.override.on_boost_cancel(id)
+            end
             # Remove last button and relay triggers
             util.buttons.pop_trigger()
             util.relays.pop_trigger()
