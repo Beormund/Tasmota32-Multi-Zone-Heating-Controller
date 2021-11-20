@@ -16,27 +16,43 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #  ------------------------------------------------------------------------------------------------------
 
+import global
 
-# Import heating.be from file system
-import heating
-# Set the number of heating zones (3 zones by default)
-heating.options.zones = 3
-# Basic support for I2C LCD 20x4/20x2 display
-# Requires display.be to be uploaded to file system
-heating.options.use_lcd = true
-# Synchronise the relay web toggle button labels
-# with the heating controller zone labels 
-heating.options.sync_webbuttons = true
-# WS2812 pin needs to be configured for LED
-# pixel indicator support
-heating.options.use_indicators = true
-# Eable Tasmota/MQTT "zone" command to change
-# power state of heating zones
-heating.options.use_cmd = true
-# Publish MQTT heating zone telemetry
-heating.options.use_mqtt = true
+class module_loader
+    var wd, cache
+    def init()
+        self.wd = tasmota.wd
+        self.cache = []
+    end
+    def require(module)
+        if self.cache.find(module) != nil 
+            return 
+        end
+        if size(self.wd)
+            import sys
+            # Add tapp path to sys.path
+            sys.path().push(self.wd)
+            # Load module from file system
+            load(self.wd + module)
+            self.push(module)
+            # Remove tapp path from sys.path
+            sys.path().pop()
+        else
+            load(self.wd + module)
+            self.push(module)
+        end
+    end
+    def push(module)
+        if self.cache.find(module) == nil
+            self.cache.push(module)
+        end
+    end
+end
+
+var loader = module_loader()
+# Load heating.be from file system
+loader.require('heating.be')
 # Initialise heating controller
-var hc = heating.controller()
+var hc = global.heating.controller()
 # Start the heating controller
 hc.start()
-
