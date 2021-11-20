@@ -86,41 +86,13 @@ If you live in a region with daylight saving you might want to specify a std/dst
 
 Don't forget to configure MQTT if you wish to receive Heating Controller telemetry.
 
-### 4. Upload scripts and supporting files
+### 4. Upload Tasmota Application file (heating.tapp)
 
-Navigate to **Consoles | Manage File system** and upload the following files from the repository:
+Navigate to **Consoles | Manage File system** and upload the following Tasmota Application from the repository:
 
-[html.json](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/blob/main/html.json),
-[heating.be](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/blob/main/heating.be), 
-[display.be](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/blob/main/display.be),
-[autoexec.be](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/blob/main/autoexec.be)
+[heating.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/blob/main/bin/heating.tapp)
 
-Options can be enabled/disabled by editing the autoexec file using **Consoles | Manage File system** and clicking on the edit icon next to the autoexec script.
-
-```python
-# Import heating.be from file system
-import heating
-# Set the number of heating zones (3 zones by default)
-heating.options.zones = 3
-# Basic support for I2C LCD 20x4/20x2 display
-# Requires display.be to be uploaded to file system
-heating.options.use_lcd = true
-# Synchronise the relay web toggle button labels
-# with the heating controller zone labels 
-heating.options.sync_webbuttons = true
-# WS2812 pin needs to be configured for LED
-# pixel indicator support
-heating.options.use_indicators = true
-# Eable Tasmota/MQTT "zone" command to change
-# power state of heating zones
-heating.options.use_cmd = true
-# Publish MQTT heating zone telemetry
-heating.options.use_mqtt = true
-# Initialise heating controller
-var hc = heating.controller()
-# Start the heating controller
-hc.start()
-```
+Options can be enabled/disabled by using the Configure Heating web page.
 
 ## Operation
 
