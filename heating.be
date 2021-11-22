@@ -77,6 +77,12 @@ class tasmota_api
     def resp_cmnd(payload)
         tasmota.resp_cmnd(payload)
     end
+    def web_send(msg)
+        tasmota.web_send(msg)
+    end
+    def response_append(msg)
+        tasmota.response_append(msg)
+    end
     def publish_result(payload)
         tasmota.publish_result(payload, '')
     end
@@ -246,22 +252,26 @@ end
 
 # A status contains information about the current state of a zone
 class status
-    var zone, mode, power, expiry
+    var zone, mode, power, expiry, label, key, state
     # @param zone: index of zone from util.settings.zones
     # @param mode: which mode the zone is currently set to
     # @param power: on/off state of zone
     # @param expiry: next on/off time for auto or expiry for boost
     def init(zone, mode, power, expiry)
         self.zone = zone
+        self.label = util.settings.zones.get_label(self.zone)
         self.mode = mode
+        self.key = util.modes[self.mode]
         self.power = power
+        self.state = self.power ? 'On' : 'Off'
         self.expiry = expiry
     end
     # Display max 20 chars: e.g., 'HTG1 off until 16:30'
     def set_lcd()
         if !util.lcd return end
-        var message = self._call(false, '%s %s until %s')
-        util.lcd.print(self.zone+2, message) 
+        var fmt = 12&(1<<self.mode) ? "%s %s Const" : '%s %s until %%R'
+        var args = [fmt, self.label, self.state]
+        util.lcd.print(self.zone+2, self.format(args)) 
     end
     # WS2812 LED (1 pixel per zone) indicator
     def set_led()
@@ -273,7 +283,17 @@ class status
     # Publish this status as an MQTT message
     def pub_mqtt()
         if !util.config.is_option_set(util.options['MQTT']) return end
-        heating.api.publish_result(json.dump(self._tomap()))
+        heating.api.publish_result(json.dump(self.tomap()))
+    end
+    # Sends as sensor payload to Web manager
+    def set_sensor()
+        # "{s}HTG1 Auto On Until{m}Fri 22:00{e}"
+        var fmt = 12&(1<<self.mode)
+            ? '{s}<a href="/hm">%s %s</a>{m}Const Mode{e}'
+            : '{s}<a href="/hm">%s %s until %%a %%R</a>{m}%s Mode{e}'
+        var args = [fmt, self.label, self.state, self.key]
+        var msg = self.format(args)
+        util.settings.zones[self.zone].sensor = msg
     end
     # Log info with the BRY: prefix
     def log_info()
@@ -281,43 +301,34 @@ class status
     end
     # E.g., 'HTG1 Auto off until 16:30 Mon 18 Oct 21'
     def get_info()
-        return self._call(true, '%s %s %s until %s',  util.modes[self.mode])
+        var fmt = 12&(1<<self.mode)
+            ? '%s %s Const' 
+            : '%s %s %s until %%H:%%M %%a %%d %%b %%y'
+        var args = [fmt, self.label, self.key, self.state]
+        return self.format(args)
+    end
+    def format(args)
+        return heating.api.strftime(
+            call(string.format, args), 
+            self.expiry
+        )
     end
     # Update logs, LED, MQTT and LCD screen
     def notify()
         self.log_info()
+        self.set_sensor()
         self.set_led()
         self.pub_mqtt()
         self.set_lcd()
     end
-    # Short time: 16:30; Detailed time: 16:30 Mon 18 Oct 21
-    def _getdt(secs, detailed)
-        return detailed 
-            ? heating.api.strftime('%H:%M %a %d %b %y', secs)
-            : heating.api.strftime('%R', secs)
-    end
-    # Calls string.format with varying args
-    def _call(d, *args)
-        var label = util.settings.zones.get_label(self.zone)
-        var power = self.power ? 'on' : 'off'
-        if self.mode == 2 || self.mode == 3
-            return string.format('%s Const %s', label, power)
-        else
-            args.insert(1, label)
-            args.push(power)
-            args.push(self._getdt(self.expiry, d))
-            return call(string.format, args)
-        end
-    end
     # Helper map for self.pub_mqtt()
-    def _tomap()
+    def tomap()
         return {
-            "Heating": {
-                "Zone": self.zone + 1,
-                "Label": util.settings.zones.get_label(self.zone),
-                "Mode": util.modes[self.mode],
-                "Power": self.power ? 'On' : 'Off',
-                "Until": self._getdt(self.expiry, true)
+            "Zone" .. self.zone+1: {
+                "Label": self.label,
+                "Mode": self.key,
+                "Power": self.state,
+                "Until": self.format("%%FT%%T")
             }
         }
     end
@@ -330,7 +341,9 @@ end
 # zone['p'] = power (2 bit for auto & override)
 class zone: map
     static label = 'l', expiry = 'e', mode = 'm', power = 'p'
+    var sensor
     def init(o)
+        self.sensor = ''
         super(self).init()
         o = isinstance(o, map) ? o : {"l": o ,"e": 0, "m": 0, "p": 0}
         for k: o.keys()
@@ -413,6 +426,15 @@ class zones: list
         var p = self.get_power(z, m)
         var e = self.get_expiry(z)
         return status(z, m, p, e)
+    end
+    def tojson()
+        var l = {}
+        for z: 0 .. self.size()-1
+            var m = self.get_status(z).tomap()
+            var key = 'Zone' .. z+1
+            l.setitem(key, m[key])
+        end
+        return json.dump(l)
     end
 end
 
@@ -1047,6 +1069,18 @@ class WebManager : Driver
     def web_add_config_button()
         webserver.content_send(self.button)
     end
+    def web_sensor()
+        var msg = ''
+        for z: util.settings.zones
+            msg+= z.sensor
+        end
+        heating.api.web_send(msg)
+    end
+    def json_append()
+        var jsonstr = util.settings.zones.tojson()
+        var msg = ",\"Heating\":" .. jsonstr
+        heating.api.response_append(msg)
+    end
     # Hydrate a schedule object for a new/update action
     def fill_schedule(id, s)
         s[s.id] = id
@@ -1296,10 +1330,10 @@ class relays: component
             # Toggle Boost or Day 
             elif mode == 1 || mode == 5
                 # Switch to Advance mode if Auto doesn't toggle power
-                if (util.settings.zones.get_power(zone) ? !to_power : to_power)
-                    util.override.set(zone, 0)
-                else
+                if (int(util.settings.zones.get_power(zone)) ^ to_power)
                     util.override.set(zone, 4)
+                else
+                    util.override.set(zone, 0)
                 end
             end
         end
