@@ -965,9 +965,11 @@ class ScheduleGUI
     def bits2days(bits)
         var l = []
         for d: 0 .. util.days.size()-1
-            bits & (1 << d) ? l.push(util.days[d][0]) : l.push('-')
+            bits & (1 << d) 
+            ? l.push(util.days[d][0]) 
+            : l.push("<mark>" .. util.days[d][0] .. "</mark>")
         end
-        return '[' .. l.concat() .. ']'
+        return l.concat()
     end
     # Send a list of schedules as HTML fragment
     def show_schedules(html)
@@ -987,7 +989,7 @@ class ScheduleGUI
                 string.format(
                     html[1], s[s.id], s[s.id], s.secs2str(s[s.on]), 
                     s.secs2str(s[s.off]), day_str, zone_str, 
-                    t ? zone_str[0 .. 9] + ".." : zone_str
+                    t ? zone_str[0 .. 11] + ".." : zone_str
                 )
             )
         end

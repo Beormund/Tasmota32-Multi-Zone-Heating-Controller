@@ -14,8 +14,8 @@
         "</fieldset></form>"
     ],
     "sched-sum": [
-        "<fieldset><legend>Configure Heating Schedules</legend>",
-        "<span><a href='/hm?id=%d'>Timer %d</a>: %s-%s %s </span><span title='%s'>%s</span><br />",
+        "<style>mark{background:#4f4f4f;color:grey;}</style><fieldset><legend>Configure Heating Schedules</legend>",
+        "<span><a href='/hm?id=%d'>Timer %d</a>: %s-%s [%s] </span><span title='%s'>%s</span><br />",
         "<div><form action='/hm' method='get'><input type='hidden' name='id' value='%d'/><button class='button bgrn'>Add Timer</button></form></div></fieldset><p />"
     ],
     "sched": [
