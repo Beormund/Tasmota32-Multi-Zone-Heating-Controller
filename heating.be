@@ -151,6 +151,15 @@ class util
         'SYNC BTNS': 8, # 1 << 3
         'MQTT': 16 # 1 << 4
     }
+    # Allowed custom command parameter values
+    static cmd_params = {
+        'on': true, 
+        'off': false, 
+        '1': true, 
+        '0': false, 
+        'true': true, 
+        'false': false
+    }
     # Settings are retrieved from persist. Call config.load() to hydrate schedules and zones
     static settings = heating.api.get_persist()
     # LCD display. See screen class for further details. HeatingController initialises the display
@@ -1363,8 +1372,13 @@ class zone_command
             var mode = util.settings.zones.get_mode(zone)
             if isinstance(payload_json, map)
                 self.cmd_set_mode(zone, mode, payload_json)
-            else 
-                self.cmd_set_power(zone, mode, payload)
+            elif payload == ''
+                util.settings.zones.get_status(zone).pub_mqtt()             
+            else
+                var power = util.cmd_params.find(string.tolower(payload))
+                if power != nil 
+                    self.cmd_set_power(zone, mode, power) 
+                end
             end
         end
         var message = string.toupper(string.format('%s%d', cmd, idx))
@@ -1389,11 +1403,10 @@ class zone_command
         end
     end
     # Change the power state of the zone if different from current state
-    def cmd_set_power(zone, mode, payload)
+    def cmd_set_power(zone, mode, to_power)
         var from_power = util.settings.zones.get_power(zone, mode)
-        var to_power = int(payload)
         # XOR returns true if power needs toggling
-        if (to_power == 1 || to_power == 0) && (from_power ? !to_power : to_power)
+        if from_power ? !to_power : to_power
             # Toggle Advance/Auto
             if mode == 0 || mode == 4
                 util.override.toggle_mode(zone, {0:4,4:0})
@@ -1403,7 +1416,7 @@ class zone_command
             # Toggle Boost or Day 
             elif mode == 1 || mode == 5
                 # Switch to Advance mode if Auto doesn't toggle power
-                if (util.settings.zones.get_power(zone) ? !to_power : to_power)
+                if util.settings.zones.get_power(zone) ? !to_power : to_power
                     util.override.set(zone, 4)
                 else
                     util.override.set(zone, 0)
