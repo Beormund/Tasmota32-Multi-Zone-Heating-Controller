@@ -479,7 +479,7 @@ class schedule: map
     # E.g., 10:15 -> 10x3600 + 15x60 
     def str2secs(str)
         var hours = int(str[0..1])
-        var mins = int(str[3..])
+        var mins = int(str[3..4])
         return hours*3600+mins*60
     end
     # Converts 36000 to "10:00"
@@ -1431,6 +1431,10 @@ end
 # The main class for setting up the heating controller
 class HeatingController
     def init()
+        # Controller needs to detach buttons from relays
+        heating.api.cmd("setoption73 1")
+        # Controller needs to disable I2CDriver 35
+        heating.api.cmd("I2CDriver35 0")
         # Create the configuration capability
         util.config = config()
         # Load persisted label, zone and schedule data
