@@ -16,43 +16,15 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #  ------------------------------------------------------------------------------------------------------
 
-import global
+# All imports required for the heating app
+import string
+import json
+import webserver
+import persist
+import display
+import heating
 
-class module_loader
-    var wd, cache
-    def init()
-        self.wd = tasmota.wd
-        self.cache = []
-    end
-    def require(module)
-        if self.cache.find(module) != nil 
-            return 
-        end
-        if size(self.wd)
-            import sys
-            # Add tapp path to sys.path
-            sys.path().push(self.wd)
-            # Load module from file system
-            load(self.wd + module)
-            self.push(module)
-            # Remove tapp path from sys.path
-            sys.path().pop()
-        else
-            load(self.wd + module)
-            self.push(module)
-        end
-    end
-    def push(module)
-        if self.cache.find(module) == nil
-            self.cache.push(module)
-        end
-    end
-end
-
-var loader = module_loader()
-# Load heating.be from file system
-loader.require('heating.be')
 # Initialise heating controller
-var hc = global.heating.controller()
+var hc = heating.controller()
 # Start the heating controller
 hc.start()

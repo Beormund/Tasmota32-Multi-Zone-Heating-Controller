@@ -16,81 +16,74 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #  ------------------------------------------------------------------------------------------------------
 
-import string
-import json
-import webserver
-import global
-
 var heating = module('heating')
 
-# All tasmota api calls are accessed via heating.api
-class tasmota_api
-    def strftime(format, secs)
+# All tasmota calls are accessed via api class
+class api
+    static wd = tasmota.wd
+    static settings = persist    
+    static def strftime(format, secs)
         return tasmota.strftime(format, secs)
     end
-    def rtc()
+    static def rtc()
         return tasmota.rtc()
     end
-    def time_dump(secs)
+    static def time_dump(secs)
         return tasmota.time_dump(secs)
     end
-    def now()
-        var l = self.rtc()['local']
-        var t = self.time_dump(l)
+    static def now()
+        var l = tasmota.rtc()['local']
+        var t = tasmota.time_dump(l)
         var sfm = t['hour']*3600+t['min']*60+t['sec']
         t.setitem('sfm', sfm)
         t.setitem('local', l)
         return t
     end
-    def tomorrow(day)
-        var wd = day != nil ? day : self.now()['weekday']
+    static def tomorrow(day)
+        var wd = day != nil ? day : api.now()['weekday']
         return wd < 6 ? wd+1 : 0
     end
-    def cmd(text)
+    static def cmd(text)
         return tasmota.cmd(text)
     end
-    def log(text)
+    static def log(text)
         tasmota.log(text)
     end
-    def set_timer(millis, func, id)
+    static def set_timer(millis, func, id)
         tasmota.set_timer(millis, func, id)
     end
-    def remove_timer(id)
+    static def remove_timer(id)
         tasmota.remove_timer(id)
     end
-    def set_power(zone, power)
-        if self.get_relay_count() > zone
+    static def set_power(zone, power)
+        if api.get_relay_count() > zone
             if tasmota.get_power()[zone] != power
                 tasmota.set_power(zone, power)
             end
         end
     end
-    def add_rule(trigger, func)
+    static def add_rule(trigger, func)
         tasmota.add_rule(trigger, func)
     end
-    def remove_rule(trigger)
+    static def remove_rule(trigger)
         tasmota.remove_rule(trigger)
     end
-    def add_cmd(cmd, func)
+    static def add_cmd(cmd, func)
         tasmota.add_cmd(cmd, func)
     end
-    def resp_cmnd(payload)
+    static def resp_cmnd(payload)
         tasmota.resp_cmnd(payload)
     end
-    def web_send(msg)
+    static def web_send(msg)
         tasmota.web_send(msg)
     end
-    def response_append(msg)
+    static def response_append(msg)
         tasmota.response_append(msg)
     end
-    def publish_result(payload)
+    static def publish_result(payload)
         tasmota.publish_result(payload, '')
     end
-    def get_persist()
-        import persist
-        return persist
-    end
-    def get_relay_count()
+    static def get_relay_count()
         def pin(t, enum)
             while gpio.pin(enum, t) != -1 t+=1 end
             return t
@@ -98,8 +91,6 @@ class tasmota_api
         return pin(0, gpio.REL1) + pin(0, gpio.REL1_INV)
     end
 end
-
-heating.api = tasmota_api()
 
 class util
     # Weekday names. Sun = 0, Sat = 6
@@ -160,9 +151,7 @@ class util
         'true': true, 
         'false': false
     }
-    # Settings are retrieved from persist. Call config.load() to hydrate schedules and zones
-    static settings = heating.api.get_persist()
-    # LCD display. See screen class for further details. HeatingController initialises the display
+    # See screen class for further details. HeatingController initialises the lcd
     static lcd = nil
     # Enable easy access to config. HeatingController initialises the config
     static config = nil
@@ -185,9 +174,9 @@ class file
     def load(fn)
         import path
         var obj, f
-        if path.exists(loader.wd + fn)
+        if path.exists(api.wd .. fn)
             try
-                f = open(loader.wd + fn, 'r')
+                f = open(api.wd .. fn, 'r')
                 obj = json.load(f.read())
                 f.close()
             except .. as e, m
@@ -209,8 +198,8 @@ class clock
         self.tick(h, f, id)
     end
     def tick(h, f, id)
-        heating.api.set_timer(
-            f(heating.api.now()), 
+        api.set_timer(
+            f(api.now()), 
             / -> self.pop(h, f, id)
             , id
         )
@@ -226,15 +215,14 @@ end
 class screen
     var lcd, ticker
     def init()
-        loader.require('display.be')
-        self.lcd = global.display.lcd_i2c()
+        self.lcd = display.lcd_i2c()
     end
     def power(bool)
         self.lcd.set_backlight(bool)
     end
     def update_clock()
-        var ls = heating.api.rtc()['local']
-        self.lcd.write_line(heating.api.strftime('%H:%M %a %d %b %y', ls), 1)
+        var ls = api.rtc()['local']
+        self.lcd.write_line(api.strftime('%H:%M %a %d %b %y', ls), 1)
     end
     def print(line, text)
         self.lcd.write_line(text, line)
@@ -254,7 +242,7 @@ class screen
         self.ticker.start(h, f, 'ticker')
     end
     def stop_clock()
-        heating.api.remove_timer('ticker')
+        api.remove_timer('ticker')
         self.ticker = nil
     end
 end
@@ -262,13 +250,13 @@ end
 # A status contains information about the current state of a zone
 class status
     var zone, mode, power, expiry, label, key, state
-    # @param zone: index of zone from util.settings.zones
+    # @param zone: index of zone from api.settings.zones
     # @param mode: which mode the zone is currently set to
     # @param power: on/off state of zone
     # @param expiry: next on/off time for auto or expiry for boost
     def init(zone, mode, power, expiry)
         self.zone = zone
-        self.label = util.settings.zones.get_label(self.zone)
+        self.label = api.settings.zones.get_label(self.zone)
         self.mode = mode
         self.key = util.modes[self.mode]
         self.power = power
@@ -287,12 +275,12 @@ class status
         if !util.config.is_option_set(util.options['LED']) return end
         var led = 'Led' .. self.zone+1
         var color = self.power ? util.colors[self.mode] : 'FF0000'
-        heating.api.cmd(string.format('%s #%s', led, color))
+        api.cmd(string.format('%s #%s', led, color))
     end
     # Publish this status as an MQTT message
     def pub_mqtt()
         if !util.config.is_option_set(util.options['MQTT']) return end
-        heating.api.publish_result(json.dump(self.tomap()))
+        api.publish_result(json.dump(self.tomap()))
     end
     # Sends as sensor payload to Web manager
     def set_sensor()
@@ -302,11 +290,11 @@ class status
             : '{s}<a href="/hm">%s %s until %%a %%R</a>{m}%s Mode{e}'
         var args = [fmt, self.label, self.state, self.key]
         var msg = self.format(args)
-        util.settings.zones[self.zone].sensor = msg
+        api.settings.zones[self.zone].sensor = msg
     end
     # Log info with the BRY: prefix
     def log_info()
-        heating.api.log('BRY: ' .. self.get_info())
+        api.log('BRY: ' .. self.get_info())
     end
     # E.g., 'HTG1 Auto off until 16:30 Mon 18 Oct 21'
     def get_info()
@@ -317,7 +305,7 @@ class status
         return self.format(args)
     end
     def format(args)
-        return heating.api.strftime(
+        return api.strftime(
             call(string.format, args), 
             self.expiry
         )
@@ -492,19 +480,19 @@ class schedule: map
     def get_runat(_t)
         if !self[self.days] return 0 end
         var t = self[_t] # _t is '1' (on) or '0' (off)
-        var now = heating.api.now()
+        var now = api.now()
         var sfm = now['sfm'] # Now as secs from midnight
         var wd = now['weekday'] # Today [0 .. 6]
         var i = t <= sfm ? 1 : 0 # Has on/off time past?
-        var day = i ? heating.api.tomorrow(wd) : wd 
+        var day = i ? api.tomorrow(wd) : wd 
         while !self.is_set(self.days, day) i+=1
-            day = heating.api.tomorrow(day)            
+            day = api.tomorrow(day)            
         end
         return ( i ? 86400*i-(sfm-t) : t-sfm) + now['local']
     end
     # Calculates if the current schedule is on or off
     def is_running(zone)
-        var n = heating.api.now()
+        var n = api.now()
         var sfm = n['sfm']
         if self.is_set(self.days, n['weekday'])
             if zone != nil && !self.is_set(self.zones, zone)
@@ -618,12 +606,12 @@ class schedules : list
     end
     # Gets the next day's first on schedule
     def get_next_first_on(zone, day)
-        return self.get_first_on(zone, heating.api.tomorrow(day))
+        return self.get_first_on(zone, api.tomorrow(day))
     end
     # Retrieves the first on or last off schedule for day
     def get_day_onoff(zone, f, day)
         if self.size() == 0 return end
-        var wd = day != nil ? day : heating.api.now()['weekday']
+        var wd = day != nil ? day : api.now()['weekday']
         var l = 0, t = nil
         while (l < 7 && !t) l+=1 
             for s: self
@@ -632,7 +620,7 @@ class schedules : list
                     t = f(s,t) ? s : t
                 end
             end
-            wd = heating.api.tomorrow(wd)
+            wd = api.tomorrow(wd)
         end
         return t
     end
@@ -651,34 +639,34 @@ end
 # Configures zones, schedules and labels
 class config
     def get_next_status(zone)
-        if util.settings.zones.get_mode(zone)
+        if api.settings.zones.get_mode(zone)
             # Return a zone status if mode is in override
-            return util.settings.zones.get_status(zone)
+            return api.settings.zones.get_status(zone)
         else
             # Return a schedule status if mode is auto
-            return util.settings.schedules.get_next_status(zone)
+            return api.settings.schedules.get_next_status(zone)
         end
     end
     # If sync_webbuttons is true set the relay toggle button to label
     def set_webbutton(btn, label)
         # Don't set the quasi Light/WS2812 button; only relays...
-        if btn > heating.api.get_relay_count() return end 
-        heating.api.cmd(string.format('webbutton%d %s', btn, label))
+        if btn > api.get_relay_count() return end 
+        api.cmd(string.format('webbutton%d %s', btn, label))
     end
     def set_webbuttons()
-        for z: 0 .. util.settings.zones.size()-1
-            self.set_webbutton(z+1, util.settings.zones.get_label(z))
+        for z: 0 .. api.settings.zones.size()-1
+            self.set_webbutton(z+1, api.settings.zones.get_label(z))
         end
     end
     # Returns true if option set (use static option enumeration)
     # E.g., is_option_set(option.MQTT)
     def is_option_set(opt) 
-        return !!(util.settings.options & opt)
+        return !!(api.settings.options & opt)
     end
     # Enable/disable an option
     # E.g., set_option(options.MQTT, true)
     def set_option(opt, set)
-        util.settings.options ^= (-int(set) ^ util.settings.options) & opt
+        api.settings.options ^= (-int(set) ^ api.settings.options) & opt
     end
     # If LCD option is set, enable the screen
     def enable_display()
@@ -686,8 +674,8 @@ class config
             util.lcd = screen()
             util.lcd.start_clock()
             # Update zone info
-            for z: 0 .. util.settings.zones.size()-1
-                var stat = util.settings.zones.get_status(z)
+            for z: 0 .. api.settings.zones.size()-1
+                var stat = api.settings.zones.get_status(z)
                 stat.set_lcd()
             end
         end
@@ -702,32 +690,32 @@ class config
     end
     # Saves the configuration to _persist.json
     def save()
-        util.settings.save()
+        api.settings.save()
     end
     # Loads zones and schedules from _persist.json
     # If _persist.json does not contain the data default
     # options, zones, and schedules are created.
     def load()
-        if !util.settings.has('options')
-            util.settings.options = 16 # CMD enabled
+        if !api.settings.has('options')
+            api.settings.options = 16 # CMD enabled
         end
-        if util.settings.has('zones')
+        if api.settings.has('zones')
             # Need to convert from a list to zones sub-class
-            util.settings.zones = zones(util.settings.zones)
+            api.settings.zones = zones(api.settings.zones)
         else
-            util.settings.zones = zones()
-            for i: 1 .. heating.api.get_relay_count()
-                util.settings.zones.push(zone('ZN' .. i))
+            api.settings.zones = zones()
+            for i: 1 .. api.get_relay_count()
+                api.settings.zones.push(zone('ZN' .. i))
             end
         end
-        if util.settings.has('schedules')
+        if api.settings.has('schedules')
             # Need to convert from a list to schedules sub-class
-            util.settings.schedules = schedules(util.settings.schedules)
+            api.settings.schedules = schedules(api.settings.schedules)
         else
-            var sum = (1 << util.settings.zones.size())-1
+            var sum = (1 << api.settings.zones.size())-1
             # Four initial schedules are created AM & PM for weekdays & w/e
             # 62 = Mon-Fr; 65 = Sat/Sun
-            util.settings.schedules = schedules([
+            api.settings.schedules = schedules([
                 {"i": 1, "1": 23400, "0": 30600, "d": 62, "z": sum},
                 {"i": 2, "1": 59400, "0": 79200, "d": 62, "z": sum},
                 {"i": 3, "1": 27000, "0": 37800, "d": 65, "z": sum},
@@ -745,18 +733,18 @@ class scheduler
         self.running = false
     end
     def start()
-        for s: util.settings.schedules
+        for s: api.settings.schedules
             self.set_timer(s)
         end
         self.on_start()
     end
     def stop()
         self.running = false
-        heating.api.remove_timer('schedule')
+        api.remove_timer('schedule')
     end
     def set_timer(s)
         # Get the time now in seconds
-        var now = heating.api.rtc()['local']
+        var now = api.rtc()['local']
         # Is the schedule switching on or off?
         var power = s.is_running()
         # Get the next run time depending on power state
@@ -764,17 +752,17 @@ class scheduler
         # Timers are set in millis (add 1 second safety margin)
         var millis = (runat+1 - now) * 1000
         # Call on_pop when the timer expires
-        heating.api.set_timer(millis, / -> self.on_pop(s), 'schedule')
+        api.set_timer(millis, / -> self.on_pop(s), 'schedule')
     end
     # This method is only used when the scheduler is first run.
     # It retrieves statuses for next auto mode run times
     def on_start()
         self.running = true
-        for z: 0 .. util.settings.zones.size()-1
-            if util.settings.zones.get_mode(z)
+        for z: 0 .. api.settings.zones.size()-1
+            if api.settings.zones.get_mode(z)
                 # If mode is override set schedule power state
-                var power = util.settings.schedules.get_next_status(z).power
-                util.settings.zones.set_power(z, power)
+                var power = api.settings.schedules.get_next_status(z).power
+                api.settings.zones.set_power(z, power)
             else
                 # Set power states and display/log schedule status
                 self.on_completed(z)
@@ -787,18 +775,18 @@ class scheduler
         # Get the power state for the schedule
         var power = s.is_running()
         # Check each zone for the schedule
-        for zone: 0 .. util.settings.zones.size()-1
+        for zone: 0 .. api.settings.zones.size()-1
             # Is the zone set for this schedule?
             if !s.is_set(s.zones, zone) continue end
             # What mode is the zone in?
-            var mode = util.settings.zones.get_mode(zone)
+            var mode = api.settings.zones.get_mode(zone)
             if mode == 0 # Auto
                 self.on_completed(zone)
             elif mode == 4 # Advance
                 # If previous mode was Day switch back to Day mode, else Auto
-                var previous = util.settings.zones.get_mode(zone, true) == 5 ? 5 : 0
+                var previous = api.settings.zones.get_mode(zone, true) == 5 ? 5 : 0
                 # Update zone configuration state
-                util.settings.zones.set_zone(zone, previous, power)
+                api.settings.zones.set_zone(zone, previous, power)
                 self.on_completed(zone)
             elif mode == 5 # Daytime
                 # If schedule matches first on/last off, update power, expriry etc
@@ -806,7 +794,7 @@ class scheduler
                     self.on_completed(zone)
                 end
                 # Update schedule power
-                util.settings.zones.set_power(zone, power)
+                api.settings.zones.set_power(zone, power)
             end
         end
         # Force the updated configuration to be saved to flash
@@ -817,9 +805,9 @@ class scheduler
     def on_completed(zone)
         var stat = util.config.get_next_status(zone)
         # Update the power and expiry/next run time for the zone
-        util.settings.zones.set_zone(zone, stat.mode, stat.power, stat.expiry)
+        api.settings.zones.set_zone(zone, stat.mode, stat.power, stat.expiry)
         # Set the power state of the relay
-        heating.api.set_power(zone, stat.power)
+        api.set_power(zone, stat.power)
         # Update logs, LED, MQTT and LCD screen
         stat.notify()
     end
@@ -847,7 +835,7 @@ class override
     end
     # Before the mode is changed, check if we need to cancel a running boost
     def check_boost(zone, mode)
-        var current = util.settings.zones.get_mode(zone)
+        var current = api.settings.zones.get_mode(zone)
         var id = 'boost' .. zone
         if mode != current && current == 1 && self.clocks.find(id)
             self.on_boost_cancel(zone)
@@ -855,8 +843,8 @@ class override
     end
     # Set the relay power state and log/display message for zone
     def on_completed(zone)
-        var stat = util.settings.zones.get_status(zone)
-        heating.api.set_power(zone, stat.power)
+        var stat = api.settings.zones.get_status(zone)
+        api.set_power(zone, stat.power)
         # Update logs, LED, MQTT and LCD screen
         stat.notify()
         # Force the updated configuration to be saved to flash
@@ -870,53 +858,53 @@ class override
         var repeat = false
         self.clocks[id] = clock(repeat)
         self.clocks[id].start(h, f, id)
-        var expiry = (!secs ? 3600 : secs) + heating.api.rtc()['local']
-        util.settings.zones.set_zone(zone, 1, true, expiry)
+        var expiry = (!secs ? 3600 : secs) + api.rtc()['local']
+        api.settings.zones.set_zone(zone, 1, true, expiry)
     end
     # Called by boost handler when timer completes
     def on_boost_end(zone)
         self.on_boost_cancel(zone)
-        self.set(zone, util.settings.zones.get_mode(zone, true))
+        self.set(zone, api.settings.zones.get_mode(zone, true))
     end
     # Called when boost timer is active but mode is changed
     def on_boost_cancel(zone)
         var id = 'boost' .. zone
-        heating.api.remove_timer(id)
+        api.remove_timer(id)
         self.clocks.remove(id)
-        util.settings.zones.set_power(zone, false, true)
-        util.settings.zones.set_expiry(zone, 0)
-        heating.api.log(string.format(
+        api.settings.zones.set_power(zone, false, true)
+        api.settings.zones.set_expiry(zone, 0)
+        api.log(string.format(
             'BRY: %s boost off', 
-            util.settings.zones.get_label(zone))
+            api.settings.zones.get_label(zone))
         )
     end
     # Toggle zone state
     def advance(zone)
-        var stat = util.settings.schedules.get_next_status(zone)
-        util.settings.zones.set_zone(zone, 4, !stat.power, stat.expiry)
+        var stat = api.settings.schedules.get_next_status(zone)
+        api.settings.zones.set_zone(zone, 4, !stat.power, stat.expiry)
     end
     # Swtich zone to timer mode
     def auto(zone)
-        var stat = util.settings.schedules.get_next_status(zone)
-        util.settings.zones.set_zone(zone, 0, stat.power, stat.expiry)
+        var stat = api.settings.schedules.get_next_status(zone)
+        api.settings.zones.set_zone(zone, 0, stat.power, stat.expiry)
     end
     # Switch zone permanently on
     def on(zone)
-        util.settings.zones.set_zone(zone, 2, true)
+        api.settings.zones.set_zone(zone, 2, true)
     end
     # Switch zone permanently off
     def off(zone)
-        util.settings.zones.set_zone(zone, 3, false)
+        api.settings.zones.set_zone(zone, 3, false)
     end
     # Switch zone on from first 'ON' time until last 'OFF' time 
     def day(zone, _dt)
-        var dt = _dt ? _dt : util.settings.schedules.get_daytime(zone)
+        var dt = _dt ? _dt : api.settings.schedules.get_daytime(zone)
         var start = dt['start'], finish = dt['finish']
         if !start || !finish 
             self.set(zone, 0)
             return
         end
-        var n = heating.api.now()
+        var n = api.now()
         var on = start.get_runat(start.on)
         var off = finish.get_runat(finish.off)
         var power = (on > off || on <= n['local']) && n['local'] <= off
@@ -924,14 +912,14 @@ class override
         if power expiry = off
         elif n['sfm'] < start[start.on] expiry = on
         elif n['sfm'] > finish[finish.off]
-            var nfo = util.settings.schedules.get_next_first_on(zone, n['weekday'])
+            var nfo = api.settings.schedules.get_next_first_on(zone, n['weekday'])
             expiry = nfo.get_runat(nfo.on)
         end
-        util.settings.zones.set_zone(zone, 5, power, expiry)
+        api.settings.zones.set_zone(zone, 5, power, expiry)
     end
     # Used by scheduler to test if schedule matches day first on or last off time
     def check_day(zone, s, power)
-        var dt = util.settings.schedules.get_daytime(zone)
+        var dt = api.settings.schedules.get_daytime(zone)
         var start = dt['start'], finish = dt['finish']
         if power ? start[start.id] == s[s.id] : finish[finish.id] == s[s.id]
             self.day(zone, dt)
@@ -940,10 +928,10 @@ class override
     end
     # Refresh overrides for all zones on re-start or schedule/zone changes.
     def refresh()
-        for zone: 0 .. util.settings.zones.size()-1
-            var mode = util.settings.zones.get_mode(zone)
+        for zone: 0 .. api.settings.zones.size()-1
+            var mode = api.settings.zones.get_mode(zone)
             if mode == 1 && !self.clocks.find('boost' .. zone)
-                var expiry = util.settings.zones.get_expiry(zone) - heating.api.rtc()['local']
+                var expiry = api.settings.zones.get_expiry(zone) - api.rtc()['local']
                 self.set(zone, mode, expiry)
             elif mode  > 1
                 self.set(zone, mode)
@@ -952,7 +940,7 @@ class override
     end
     # Set the mode for a given zone per flow control map
     def toggle_mode(zone, flow)
-        var mode = util.settings.zones.get_mode(zone)
+        var mode = api.settings.zones.get_mode(zone)
         if !flow.has(mode) return end
         self.set(zone, flow[mode])
     end
@@ -974,13 +962,13 @@ class ScheduleGUI
     # Send a list of schedules as HTML fragment
     def show_schedules(html)
         webserver.content_send(html[0])
-        for s: util.settings.schedules
+        for s: api.settings.schedules
             var day_str = self.bits2days(s[s.days])
             var zone_str = ''
-            for z: 0 .. util.settings.zones.size()-1
+            for z: 0 .. api.settings.zones.size()-1
                 if !s.is_set(s.zones, z) continue end
-                zone_str += util.settings.zones.get_label(z)
-                if z < util.settings.zones.size()-1
+                zone_str += api.settings.zones.get_label(z)
+                if z < api.settings.zones.size()-1
                     zone_str += ' '
                 end
             end
@@ -993,12 +981,12 @@ class ScheduleGUI
                 )
             )
         end
-        var new_id = util.settings.schedules.next_id()
+        var new_id = api.settings.schedules.next_id()
         webserver.content_send(string.format(html[2], new_id ))
     end
     # Displays a web control for editing a single schedule
     def show_editor(id, html)
-        var s = util.settings.schedules.get(id)
+        var s = api.settings.schedules.get(id)
         var action = s ? 'update' : 'new'
         s = s ? s : schedule()
         webserver.content_send(string.format(html[0], id, id, s.secs2str(s[s.on]), s.secs2str(s[s.off])))
@@ -1008,8 +996,8 @@ class ScheduleGUI
             webserver.content_send(string.format(html[1], dl, 1 << d, checked, dl, dl))
         end
         webserver.content_send(html[2])
-        for z: 0 .. util.settings.zones.size()-1
-            var checked = s.is_set(s.zones, z) ? 'checked' : '', zl = util.settings.zones.get_label(z)
+        for z: 0 .. api.settings.zones.size()-1
+            var checked = s.is_set(s.zones, z) ? 'checked' : '', zl = api.settings.zones.get_label(z)
             webserver.content_send(string.format(html[3], zl, 1 << z, checked, zl, zl))
         end
         webserver.content_send(string.format(html[4], action, id))
@@ -1025,19 +1013,19 @@ class ZoneGUI
     # Shows a list of zones with status info
     def show_zones(html)
         webserver.content_send(html[0])
-        for z: 1 .. util.settings.zones.size()
-            var info = util.settings.zones.get_status(z-1).get_info()
+        for z: 1 .. api.settings.zones.size()
+            var info = api.settings.zones.get_status(z-1).get_info()
             webserver.content_send(
                 string.format(html[1], z, z, info)
             )
         end
-        var new_id = util.settings.zones.size()+1
+        var new_id = api.settings.zones.size()+1
         webserver.content_send(string.format(html[2], new_id ))
         webserver.content_send(html[3])
     end
     # Displays a web control for editing a single zone
     def show_editor(zid, html)
-        var z = util.settings.zones.get(zid-1)
+        var z = api.settings.zones.get(zid-1)
         var action = z != nil ? 'update' : 'new'
         z = z ? z : zone('ZN' .. zid)
         webserver.content_send(string.format(html[0], zid-1, zid, z[zone.label]))
@@ -1082,15 +1070,15 @@ class WebManager : Driver
     end
     def web_sensor()
         var msg = ''
-        for z: util.settings.zones
+        for z: api.settings.zones
             msg+= z.sensor
         end
-        heating.api.web_send(msg)
+        api.web_send(msg)
     end
     def json_append()
-        var jsonstr = util.settings.zones.tojson()
+        var jsonstr = api.settings.zones.tojson()
         var msg = ",\"Heating\":" .. jsonstr
-        heating.api.response_append(msg)
+        api.response_append(msg)
     end
     # Hydrate a schedule object for a new/update action
     def fill_schedule(id, s)
@@ -1123,27 +1111,27 @@ class WebManager : Driver
         end
         if webserver.has_arg('delete')
             # Check boost.If active cancel...
-            if util.settings.zones.get_mode(id) == 1
+            if api.settings.zones.get_mode(id) == 1
                 util.override.on_boost_cancel(id)
             end
             # Remove last button and relay triggers
             util.buttons.pop_trigger()
             util.relays.pop_trigger()
             # Remove zone from zone collection
-            util.settings.zones.pop(id)
+            api.settings.zones.pop(id)
             # Remove zone from schedules
-            util.settings.schedules.remove_zone(id)
+            api.settings.schedules.remove_zone(id)
             # Clear display zone info
             if util.lcd
-                for l: 2 .. util.settings.zones.size()+2
+                for l: 2 .. api.settings.zones.size()+2
                     util.lcd.clear_line(l)
                 end
             end
             # Re-sync power state for reshuffled zones
-            for z: 0 .. util.settings.zones.size()-1
-                var stat = util.settings.zones.get_status(z)
+            for z: 0 .. api.settings.zones.size()-1
+                var stat = api.settings.zones.get_status(z)
                 # Set the power state of the relay
-                heating.api.set_power(z, stat.power)
+                api.set_power(z, stat.power)
                 # Notify display etc.
                 stat.notify()
             end
@@ -1158,9 +1146,9 @@ class WebManager : Driver
             var label = webserver.has_arg('label') ? webserver.arg('label') : ''
             label = size(label) ? label : 'ZN' .. id+1
             # Add the new zone to the zones collection
-            util.settings.zones.push(zone(label))
+            api.settings.zones.push(zone(label))
             # Add the new zone to schedules
-            util.settings.schedules.set_zone(id)
+            api.settings.schedules.set_zone(id)
             # Sync button and relay triggers
             util.buttons.add_trigger(id)
             util.relays.add_trigger(id)
@@ -1179,8 +1167,8 @@ class WebManager : Driver
             if webserver.has_arg('label')
                 var label = webserver.arg('label')
                 # Only update the label if it has changed
-                if size(label) > 0 && label != util.settings.zones.get_label(id)
-                    util.settings.zones.set_label(id, label)
+                if size(label) > 0 && label != api.settings.zones.get_label(id)
+                    api.settings.zones.set_label(id, label)
                     _dirty = true
                      # Sync the Tasmota UI Toggle buttons
                     if util.config.is_option_set(util.options['SYNC BTNS'])
@@ -1192,14 +1180,14 @@ class WebManager : Driver
             if webserver.has_arg('modes[]')
                 var mode = int(webserver.arg('modes[]'))
                 # Only update the mode if it has changed
-                if mode != util.settings.zones.get_mode(id)
+                if mode != api.settings.zones.get_mode(id)
                     set_mode(id, mode)
                     _dirty = false
                 end
             end
             # There are updates so update the display and pub to MQTT
             if _dirty
-                var stat = util.settings.zones.get_status(id)
+                var stat = api.settings.zones.get_status(id)
                 stat.set_lcd()
                 stat.pub_mqtt()
             end
@@ -1208,16 +1196,16 @@ class WebManager : Driver
     # Deletes/Updates/Creates a schedule based on web form entry
     def update_schedule(id)
         if webserver.has_arg('delete')
-            util.settings.schedules.pop(id)
+            api.settings.schedules.pop(id)
             return true
         elif webserver.has_arg('update')
             var schedule = schedule()
             self.fill_schedule(id, schedule)
-            return util.settings.schedules.update(schedule)
+            return api.settings.schedules.update(schedule)
         elif webserver.has_arg('new')
             var schedule = schedule()
             self.fill_schedule(id, schedule)
-            util.settings.schedules.push(schedule)
+            api.settings.schedules.push(schedule)
             return true
         end
     end
@@ -1285,18 +1273,18 @@ class component
         self.add_triggers()
     end
     def add_trigger(zone)
-        heating.api.add_rule(
+        api.add_rule(
             string.format(self.fmt(), zone+1), / v, t -> self.on_changed(v, t)
         )
     end
     def add_triggers()
-        for i: 0 .. util.settings.zones.size()-1
+        for i: 0 .. api.settings.zones.size()-1
             self.add_trigger(i)
         end
     end
     def pop_trigger()
-        heating.api.remove_rule(
-            string.format(self.fmt(), util.settings.zones.size())
+        api.remove_rule(
+            string.format(self.fmt(), api.settings.zones.size())
         )
     end
 end
@@ -1323,12 +1311,12 @@ class relays: component
     # Check webbutton power toggle syncs with heating controller state
     def on_changed(v, t)
         var zone = int(string.split(t, '#')[0][5..])-1
-        var mode = util.settings.zones.get_mode(zone)
+        var mode = api.settings.zones.get_mode(zone)
         self.cmd_set_power(zone, mode, v)
     end
     # Change the power state of the zone if different from current state
     def cmd_set_power(zone, mode, payload)
-        var from_power = util.settings.zones.get_power(zone, mode)
+        var from_power = api.settings.zones.get_power(zone, mode)
         var to_power = int(payload)
         # XOR returns true if power needs toggling
         if (to_power == 1 || to_power == 0) && (from_power ? !to_power : to_power)
@@ -1341,7 +1329,7 @@ class relays: component
             # Toggle Boost or Day 
             elif mode == 1 || mode == 5
                 # Switch to Advance mode if Auto doesn't toggle power
-                if (int(util.settings.zones.get_power(zone)) ^ to_power)
+                if (int(api.settings.zones.get_power(zone)) ^ to_power)
                     util.override.set(zone, 4)
                 else
                     util.override.set(zone, 0)
@@ -1356,7 +1344,7 @@ class zone_command
         self.add_command('zone')
     end
     def add_command(cmd)
-        heating.api.add_cmd(cmd, / c, i, p, j -> self.on_cmd(c, i, p, j))
+        api.add_cmd(cmd, / c, i, p, j -> self.on_cmd(c, i, p, j))
     end
     # Handler for zone command
     # zone1 1 -> turn on heating zone 1
@@ -1366,16 +1354,16 @@ class zone_command
     # The zone will be switched into an appropriate mode
     def on_cmd(cmd, idx, payload, payload_json)
         if !util.config.is_option_set(util.options['CMD']) 
-            heating.api.resp_cmnd('{"Command": "Unknown"}')
+            api.resp_cmnd('{"Command": "Unknown"}')
             return
         end
         var zone = idx-1
-        if zone < util.settings.zones.size()
-            var mode = util.settings.zones.get_mode(zone)
+        if zone < api.settings.zones.size()
+            var mode = api.settings.zones.get_mode(zone)
             if isinstance(payload_json, map)
                 self.cmd_set_mode(zone, mode, payload_json)
             elif payload == ''
-                util.settings.zones.get_status(zone).pub_mqtt()             
+                api.settings.zones.get_status(zone).pub_mqtt()             
             else
                 var power = util.cmd_params.find(string.tolower(payload))
                 if power != nil 
@@ -1384,7 +1372,7 @@ class zone_command
             end
         end
         var message = string.toupper(string.format('%s%d', cmd, idx))
-        heating.api.resp_cmnd(string.format('{"%s": "DONE"}', message))
+        api.resp_cmnd(string.format('{"%s": "DONE"}', message))
     end
     # Change the operating mode for the zone if different from current mode
     def cmd_set_mode(zone, mode, payload)
@@ -1406,7 +1394,7 @@ class zone_command
     end
     # Change the power state of the zone if different from current state
     def cmd_set_power(zone, mode, to_power)
-        var from_power = util.settings.zones.get_power(zone, mode)
+        var from_power = api.settings.zones.get_power(zone, mode)
         # XOR returns true if power needs toggling
         if from_power ? !to_power : to_power
             # Toggle Advance/Auto
@@ -1418,7 +1406,7 @@ class zone_command
             # Toggle Boost or Day 
             elif mode == 1 || mode == 5
                 # Switch to Advance mode if Auto doesn't toggle power
-                if util.settings.zones.get_power(zone) ? !to_power : to_power
+                if api.settings.zones.get_power(zone) ? !to_power : to_power
                     util.override.set(zone, 4)
                 else
                     util.override.set(zone, 0)
@@ -1457,9 +1445,9 @@ class HeatingController
             util.lcd.print(1, 'Starting...')
         end
         # Fires when RTC has initialized 
-        heating.api.add_rule('Time#Initialized', /  -> self.time_initialized())
+        api.add_rule('Time#Initialized', /  -> self.time_initialized())
         # Fires when MQTT has connected
-        heating.api.add_rule('Mqtt#Connected', /  -> self.mqtt_connected())
+        api.add_rule('Mqtt#Connected', /  -> self.mqtt_connected())
         # Register button press triggers
         util.buttons = buttons()
         # Register power state change triggers
@@ -1489,8 +1477,8 @@ class HeatingController
     # When MQTT connects send heating status for all zones
     def mqtt_connected()
         if util.config.is_option_set(util.options['MQTT'])
-            for z: 0 .. util.settings.zones.size()-1
-                util.settings.zones.get_status(z).pub_mqtt()
+            for z: 0 .. api.settings.zones.size()-1
+                api.settings.zones.get_status(z).pub_mqtt()
             end
         end
     end    
