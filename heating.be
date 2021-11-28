@@ -479,7 +479,7 @@ class schedule: map
     # E.g., 10:15 -> 10x3600 + 15x60 
     def str2secs(str)
         var hours = int(str[0..1])
-        var mins = int(str[3..])
+        var mins = int(str[3..4])
         return hours*3600+mins*60
     end
     # Converts 36000 to "10:00"
@@ -709,7 +709,7 @@ class config
     # options, zones, and schedules are created.
     def load()
         if !util.settings.has('options')
-            util.settings.options = 18 # CMD & MQTT enabled
+            util.settings.options = 16 # CMD enabled
         end
         if util.settings.has('zones')
             # Need to convert from a list to zones sub-class
