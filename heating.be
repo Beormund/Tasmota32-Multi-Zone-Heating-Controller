@@ -827,7 +827,7 @@ class override
     end
     # Called by boost handler when timer completes
     def on_boost_end(zone)
-        self.on_boost_cancel(zone)
+        # Set to previous mode. check_boost() will cancel boost
         self.set(zone, api.settings.zones.get_mode(zone, true))
     end
     # Called when boost timer is active but mode is changed
