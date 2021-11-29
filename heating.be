@@ -255,7 +255,7 @@ class status
     end
     # Sends as sensor payload to Web manager
     def set_sensor()
-        # "{s}HTG1 Auto On Until{m}Fri 22:00{e}"
+        # "{s}ZN1 On until Fri 22:00{m}Auto Mode{e}"
         var fmt = 12&(1<<self.mode)
             ? '{s}<a href="/hm">%s %s</a>{m}Const Mode{e}'
             : '{s}<a href="/hm">%s %s until %%a %%R</a>{m}%s Mode{e}'
@@ -1153,6 +1153,7 @@ class WebManager : Driver
                 var stat = api.settings.zones.get_status(id)
                 stat.set_lcd()
                 stat.pub_mqtt()
+                stat.set_sensor()
             end
         end
     end

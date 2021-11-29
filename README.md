@@ -44,7 +44,7 @@ This heating controller was tested with Tasmota32.bin
 
 ### 2. Configure Template
 
-Using the Tasmota web UI, navigate to **Configuration | Configure Other**. Paste the following json template into the Template field. Tick "Activate" checkbox and "Save".
+Using the Tasmota web UI, navigate to **Configuration | Configure Other**. Paste the following json template into the Template field. Tick "Activate" checkbox and "Save". You may need to adjust the template to match the number of relays you have attached.
 
 ```json
 {"NAME":"Tasmota ESP32","GPIO":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1376,0,640,608,224,0,225,226,32,0,0,0,0,33,34,1,1,1,0,0,1],"FLAG":0,"BASE":1}
@@ -96,11 +96,12 @@ Options can be enabled/disabled by using the Configure Heating web page.
 
 ## Operation
 
-1. Use the Configure Heating web page to set zone labels, modes and schedules.
+1. Navigate to Configuration | Configure Heating to set zone labels, modes, schedules, and options. Or click on the Zone summary info at the top of the Tasmota Home page.
 
-<img src="/screenshots/manage_heating.png" width="400">
-<img src="/screenshots/manage_zone.png" width="400">
-<img src="/screenshots/manage_schedule.png" width="400">
+<img src="./screenshots/tasmota_home.png" width="400">
+<img src="./screenshots/manage_heating.png" width="400">
+<img src="./screenshots/manage_zone.png" width="400">
+<img src="./screenshots/manage_schedule.png" width="400">
 
 3. If physical buttons are configured, each button can operate an associated zone as follows. SINGLE press: zone will toggle from Auto to Advance mode. Auto on switches to Advance off and Auto off switches to Advance on etc. DOUBLE press: Zone switches mode in the following order with each double press: Auto -> All Day -> Const On -> Const Off -> Auto. TRIPLE press: mode switches from Auto to Boost (1 hour), or if boost is activated, from Boost to Auto.
 4. Ensure that schedule on/off times do not overlap as this may result in unexpected behaviour.
@@ -118,3 +119,6 @@ The scripts are large and if PSRAM is not present the heap may decrease to a poi
 ## Planned Enhancements
 
 If memory and system resources allow, a nice to have would be a "schedule" command to create/update/delete schedules via console/MQTT.
+
+Tasmota Berry now has native support for WS2812 so the pixel indicator functionality will be reworked to make use of this new feature.
+
