@@ -1020,9 +1020,8 @@ end
 
 # HTTP driver for "Configure Heating" page
 class WebManager : Driver
-    var controller, restart, html, button
-    def init(restart)
-        self.restart = restart
+    var html, button
+    def init()
         self.html = util.load_file('html.json')
         self.button = self.html['button']
         self.html = nil
@@ -1215,8 +1214,10 @@ class WebManager : Driver
             self.update_zone(int(webserver.arg('z')))
         elif webserver.has_arg('s') 
             if self.update_schedule(int(webserver.arg('s')))
-                var rc = self.restart
-                rc()
+                # Restart sequence - do not alter sequence
+                util.scheduler.stop()
+                util.override.refresh()
+                util.scheduler.start()
             end
         elif webserver.has_arg('o')
             self.update_options()
@@ -1400,7 +1401,7 @@ class HeatingController
         # Create the scheduler capability
         util.scheduler = scheduler()
         # Create the web driver capability
-        util.web_manager = WebManager(/ -> self.restart())
+        util.web_manager = WebManager()
     end
     # Start the heating controller
     def start()
@@ -1420,12 +1421,6 @@ class HeatingController
         util.zone_command = zone_command()
         # Load the web driver
         tasmota.add_driver(util.web_manager)
-    end
-    # Restart sequence - do not alter sequence
-    def restart()
-        util.scheduler.stop()
-        util.override.refresh()
-        util.scheduler.start()
     end
     # Called once the RTC is initialized (Time#Initialized)
     def time_initialized()
