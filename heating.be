@@ -165,8 +165,8 @@ class util
     static buttons = nil
     # The relays class handles relay power state changes
     static relays = nil
-    # The zone_command class handles custom 'zone' command
-    static zone_command = nil
+    # This holds references to command classes such as 'zone/s' commands
+    static commands = []
     # Used to create timers for override boost and displaying time
     static def set_timer(f, d, id, r)
         api.set_timer(
@@ -251,7 +251,7 @@ class status
     # Publish this status as an MQTT message
     def pub_mqtt()
         if !util.config.is_option_set(util.options['MQTT']) return end
-        api.publish_result(json.dump(self.tomap()))
+        api.publish_result(json.dump(self.tojson()))
     end
     # Sends as sensor payload to Web manager
     def set_sensor()
@@ -290,15 +290,9 @@ class status
         self.set_lcd()
     end
     # Helper map for self.pub_mqtt()
-    def tomap()
-        return {
-            "Zone" .. self.zone+1: {
-                "Label": self.label,
-                "Mode": self.key,
-                "Power": self.state,
-                "Until": self.format("%%FT%%T")
-            }
-        }
+    def tojson()
+        var zjs = api.settings.zones[self.zone].tojson()
+        return {"Zone" .. self.zone+1:  zjs}
     end
 end
 
@@ -323,6 +317,18 @@ class zone: map
         var lsb = p ? 3 : 0, msb = lsb + 2
         return (self[self.mode] >> lsb) & ~(~0 << (msb-lsb+1))
     end
+    # Returns the zone's power state. Mode is optional 
+    def get_power(m)
+        return !!((self[self.power] >> int(!m)) & 1)
+    end
+    def tojson()
+        return {
+            "Label": self[self.label],
+            "Mode": util.modes[self.get_mode()],
+            "Power": self.get_power() ? "On" : "Off",
+            "Until": api.strftime("%FT%T", self[self.expiry])
+        }
+    end
 end
 
 # A collection of zones
@@ -343,7 +349,7 @@ class zones: list
     end
     # Returns a zone's power state 
     def get_power(z, m)
-        return !!((self[z][zone.power] >> int(!m)) & 1)
+        return self[z].get_power(m)
     end
     # Sets a zone's power state
     def set_power(z, p, m)
@@ -396,13 +402,11 @@ class zones: list
         return status(z, m, p, e)
     end
     def tojson()
-        var l = {}
-        for z: self.keys()
-            var m = self.get_status(z).tomap()
-            var key = 'Zone' .. z+1
-            l.setitem(key, m[key])
+        var m = {}
+        for k: self.keys()
+            m['Zone' .. k+1] = self[k].tojson()
         end
-        return json.dump(l)
+        return m
     end
 end
 
@@ -447,6 +451,22 @@ class schedule: map
         var mins = (secs/60)%60
         return string.format('%02d:%02d', hours, mins)
     end
+    # Gets the schedule's days as a list [0,1,1,1,1,1,0]
+    def days2list()
+        var l = []
+        for d: util.days.keys()
+            l.push(int(self.is_set(self.days, d)))
+        end
+        return l
+    end
+    # Gets the schedule's zones as a list [1,1,0]
+    def zones2list()
+        var l = []
+        for z: api.settings.zones.keys()
+            l.push(int(self.is_set(self.zones, z)))
+        end
+        return l
+    end
     # Calculates the next on/off run time in seconds
     def get_runat(_t)
         if !self[self.days] return 0 end
@@ -486,6 +506,15 @@ class schedule: map
     end
     def != (o)
         return !self==(o)
+    end
+    def tojson()
+        return {
+            "on": self.secs2str(self[self.on]),
+            "off": self.secs2str(self[self.off]),
+            "id": self[self.id],
+            "days": self.days2list(),
+            "zones": self.zones2list()
+        }
     end
 end
 
@@ -604,6 +633,13 @@ class schedules : list
         for i: self.keys()
             self[i][schedule.id] = i+1
         end
+    end
+    def tojson()
+        var m = {}
+        for k: self.keys()
+            m["Schedule" .. k+1] = self[k].tojson()
+        end
+        return m
     end
 end
 
@@ -1038,7 +1074,7 @@ class WebManager : Driver
         api.web_send(msg)
     end
     def json_append()
-        var jsonstr = api.settings.zones.tojson()
+        var jsonstr = json.dump(api.settings.zones.tojson())
         var msg = ",\"Heating\":" .. jsonstr
         api.response_append(msg)
     end
@@ -1304,13 +1340,58 @@ class relays: component
     end
 end
 
-class zone_command
-    def init()
-        self.add_command('zone')
+class command
+    def init(cmd)
+        self.add_command(cmd)
     end
     def add_command(cmd)
         api.add_cmd(cmd, / c, i, p, j -> self.on_cmd(c, i, p, j))
     end
+    def cmds_enabled()
+        if !util.config.is_option_set(util.options['CMD']) 
+            api.resp_cmnd('{"Command": "Unknown"}')
+            return false
+        end
+        return true
+    end
+end
+
+class zones_command: command
+    def init() super(self).init('zones') end
+    def on_cmd(cmd, idx, payload, payload_json)
+        if !self.cmds_enabled() return end
+        var json = json.dump({"Zones": api.settings.zones.tojson()})
+        api.publish_result(json)
+        api.resp_cmnd({"ZONES": "DONE"})
+    end
+end
+
+class schedules_command: command
+    def init() super(self).init('schedules') end
+    def on_cmd(cmd, idx, payload, payload_json)
+        if !self.cmds_enabled() return end
+        var json = json.dump({"Schedules": api.settings.schedules.tojson()})
+        api.publish_result(json)
+        api.resp_cmnd({"SCHEDULES": "DONE"})
+    end
+end
+
+class schedule_command: command
+    def init() super(self).init('schedule') end
+    def on_cmd(cmd, idx, payload, payload_json)
+        if !self.cmds_enabled() return end
+        var zone = idx-1
+        if zone < api.settings.schedules.size()
+            var json = json.dump({"Schedule" .. idx: api.settings.schedules[zone].tojson()})
+            api.publish_result(json)
+        end
+        var message = string.toupper(string.format('%s%d', cmd, idx))
+        api.resp_cmnd(string.format('{"%s": "DONE"}', message))
+    end
+end
+
+class zone_command: command
+    def init() super(self).init('zone') end
     # Handler for zone command
     # zone1 1 -> turn on heating zone 1
     # zone2 0 -> turn off heating zone 2
@@ -1318,10 +1399,7 @@ class zone_command
     # zone3 {"mode": 1, "hours": 2} -> Boost zone 3 for 2 hours
     # The zone will be switched into an appropriate mode
     def on_cmd(cmd, idx, payload, payload_json)
-        if !util.config.is_option_set(util.options['CMD']) 
-            api.resp_cmnd('{"Command": "Unknown"}')
-            return
-        end
+        if !self.cmds_enabled() return end
         var zone = idx-1
         if zone < api.settings.zones.size()
             var mode = api.settings.zones.get_mode(zone)
@@ -1417,8 +1495,11 @@ class HeatingController
         util.buttons = buttons()
         # Register power state change triggers
         util.relays = relays()
-        # Register zone command.
-        util.zone_command = zone_command()
+        # Register commands.
+        util.commands.push(zone_command())
+        util.commands.push(zones_command())
+        util.commands.push(schedule_command())
+        util.commands.push(schedules_command())
         # Load the web driver
         tasmota.add_driver(util.web_manager)
     end
