@@ -183,6 +183,13 @@ class util
         f.close()
         return obj
     end
+    # Restarts the scheduler (i.e., when schedules are updated)
+    static def restart()
+        # Restart sequence - do not alter sequence
+        util.scheduler.stop()
+        util.override.refresh()
+        util.scheduler.start()
+    end
 end
 
 # If options['LCD'] is set this class loads the display.be driver
@@ -325,7 +332,7 @@ class zone: map
         return {
             "Label": self[self.label],
             "Mode": util.modes[self.get_mode()],
-            "Power": self.get_power() ? "On" : "Off",
+            "Power": self.get_power(self.get_mode()) ? "On" : "Off",
             "Until": api.strftime("%FT%T", self[self.expiry])
         }
     end
@@ -425,6 +432,50 @@ class schedule: map
         for k: m.keys()
             self[k] = m[k]
         end
+    end
+    # validates if a json payload is in the following format:
+    # {"on": "07:00", "off": "12:59", "id":3, "days": [0,1,1,1,1,1,0], "zones":[1,1,0]}
+    # If validation successful returns a schedule instance else raises an assert_failed error 
+    static def fromjson(m)
+        var keys = ["on", "off", "id", "days", "zones"]
+        var sched = schedule()
+        for k: keys
+            assert(m.contains(k), string.format("%s value missing", k))
+            if k == 'on' || k == 'off'
+                var message = string.format("%s must be format 'HH:MM'", k)
+                assert(type(m[k]) == 'string', message)
+                assert(size(m[k]) == 5, message)
+                assert(m[k][2] == ':', message)
+                var hours = int(m[k][0..1]), mins = int(m[k][3..4])
+                assert(hours >= 0 && hours < 24, message)
+                assert(mins >= 0 && mins < 60, message)
+                sched[k == 'on' ? schedule.on : schedule.off] = hours*3600+mins*60
+            elif k == 'id'
+                assert(type(m[k]) == 'int', "id must be int")
+                sched[schedule.id] = m[k]
+            elif k == 'days' || k == 'zones'
+                assert(classname(m[k]) == 'list', string.format("%s must be list", k))
+                assert(
+                    size(m[k]) == (k == 'days' ? 7 : api.settings.zones.size()),
+                    string.format("%s list incorrect size", k)
+                )
+                var t = 0
+                for lk: 0 .. m[k].size()-1
+                    var v = m[k][lk]
+                    assert(
+                        v == 0 || v == 1, 
+                        string.format("%s list must contain flags 1 or 0", k)
+                    )
+                    if v t+= (1 << lk) end
+                end
+                sched[k == 'days' ? schedule.days : schedule.zones] = t
+            end
+        end
+        assert(
+            sched[schedule.off] > sched[schedule.on], 
+            "off time must be later than on time"
+        )
+        return sched
     end
     # true if index i of list k (days/zones) is set
     def is_set(k, i)
@@ -532,16 +583,22 @@ class schedules : list
     def push(schedule)
         schedule[schedule.id] = self.next_id()
         super(self).push(schedule)
+        return true
     end
     # list.pop overridden to remove schedule by id
     def pop(id)
+        var _dirty = false
         for s: self.keys()
             if self[s][schedule.id] == id
                super(self).pop(s)
+               _dirty = true
                break 
             end
         end
-        self.reindex()
+        if _dirty
+            self.reindex()
+        end
+        return _dirty
     end
     # Convenience method to get a schedule by id
     def get(id)
@@ -562,13 +619,18 @@ class schedules : list
     # Updates a schedule using schedule param
     def update(updated)
         var current = self.get(updated[updated.id])
-        if current && current == updated
+        if current
+            if current == updated
+                return false
+            else 
+                for k: current.keys()
+                     current[k] = updated[k]
+                end
+                return true
+            end
+        else 
             return false
         end
-        for k: current.keys()
-            current[k] = updated[k]
-        end
-        return true
     end
     # Get a status object for the next schedule
     def get_next_status(zone)
@@ -1079,7 +1141,8 @@ class WebManager : Driver
         api.response_append(msg)
     end
     # Hydrate a schedule object for a new/update action
-    def fill_schedule(id, s)
+    def tosched(id)
+        var s = schedule()
         s[s.id] = id
         for arg: 0 .. webserver.arg_size()-2
             var name = webserver.arg_name(arg)
@@ -1093,7 +1156,8 @@ class WebManager : Driver
             elif name == 'off'
                 s[s.off] = s.str2secs(value)
             end
-        end           
+        end
+        return s         
     end
     # Updates a zone based on web form entry
     def update_zone(id)
@@ -1195,17 +1259,11 @@ class WebManager : Driver
     # Deletes/Updates/Creates a schedule based on web form entry
     def update_schedule(id)
         if webserver.has_arg('delete')
-            api.settings.schedules.pop(id)
-            return true
+            return api.settings.schedules.pop(id)
         elif webserver.has_arg('update')
-            var schedule = schedule()
-            self.fill_schedule(id, schedule)
-            return api.settings.schedules.update(schedule)
+            return api.settings.schedules.update(self.tosched(id))
         elif webserver.has_arg('new')
-            var schedule = schedule()
-            self.fill_schedule(id, schedule)
-            api.settings.schedules.push(schedule)
-            return true
+            return api.settings.schedules.push(self.tosched(id))
         end
     end
     # Updates options
@@ -1250,10 +1308,7 @@ class WebManager : Driver
             self.update_zone(int(webserver.arg('z')))
         elif webserver.has_arg('s') 
             if self.update_schedule(int(webserver.arg('s')))
-                # Restart sequence - do not alter sequence
-                util.scheduler.stop()
-                util.override.refresh()
-                util.scheduler.start()
+                util.restart()
             end
         elif webserver.has_arg('o')
             self.update_options()
@@ -1341,11 +1396,11 @@ class relays: component
 end
 
 class command
-    def init(cmd)
-        self.add_command(cmd)
+    def init()
+        self.add_command()
     end
-    def add_command(cmd)
-        api.add_cmd(cmd, / c, i, p, j -> self.on_cmd(c, i, p, j))
+    def add_command()
+        api.add_cmd(self.cmd, / c, i, p, j -> self.on_cmd(c, i, p, j))
     end
     def cmds_enabled()
         if !util.config.is_option_set(util.options['CMD']) 
@@ -1354,44 +1409,75 @@ class command
         end
         return true
     end
+    def resp_cmnd(idx, msg)
+        var cmd = string.toupper(string.format('%s%d', self.cmd, idx))
+        api.resp_cmnd(string.format('{"%s": "%s"}', cmd, msg ? msg : "DONE"))
+    end
 end
 
 class zones_command: command
-    def init() super(self).init('zones') end
+    static cmd = 'Zones'
+    def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
         if !self.cmds_enabled() return end
-        var json = json.dump({"Zones": api.settings.zones.tojson()})
+        var json = json.dump({self.cmd: api.settings.zones.tojson()})
         api.publish_result(json)
-        api.resp_cmnd({"ZONES": "DONE"})
+        self.resp_cmnd()
     end
 end
 
 class schedules_command: command
-    def init() super(self).init('schedules') end
+    static cmd = 'Schedules'
+    def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
         if !self.cmds_enabled() return end
-        var json = json.dump({"Schedules": api.settings.schedules.tojson()})
+        var json = json.dump({self.cmd: api.settings.schedules.tojson()})
         api.publish_result(json)
-        api.resp_cmnd({"SCHEDULES": "DONE"})
+        self.resp_cmnd()
     end
 end
 
 class schedule_command: command
-    def init() super(self).init('schedule') end
+    static cmd = 'Schedule'
+    def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
         if !self.cmds_enabled() return end
-        var zone = idx-1
-        if zone < api.settings.schedules.size()
-            var json = json.dump({"Schedule" .. idx: api.settings.schedules[zone].tojson()})
-            api.publish_result(json)
+        if idx > 0 && idx <= api.settings.schedules.size()+1
+            var _dirty = false
+            if isinstance(payload_json, map)
+                payload_json.setitem('id', idx)
+                var sched
+                try sched = schedule.fromjson(payload_json)
+                except 'assert_failed' as e, m
+                    self.resp_cmnd(idx, m)
+                    return
+                end
+                if sched[schedule.id] == api.settings.schedules.next_id()
+                    _dirty = api.settings.schedules.push(sched)
+                else
+                    _dirty = api.settings.schedules.update(sched)
+                end
+            elif string.tolower(payload) == 'delete'
+                _dirty = api.settings.schedules.pop(idx)
+            elif payload == '' 
+                if idx > api.settings.schedules.size()
+                    self.resp_cmnd(idx, "Schedule not found")
+                    return
+                end
+                var json = json.dump({
+                    self.cmd .. idx: api.settings.schedules.get(idx).tojson()
+                })
+                api.publish_result(json)
+            end
+            if _dirty util.restart() end
         end
-        var message = string.toupper(string.format('%s%d', cmd, idx))
-        api.resp_cmnd(string.format('{"%s": "DONE"}', message))
+        self.resp_cmnd(idx)
     end
 end
 
 class zone_command: command
-    def init() super(self).init('zone') end
+    static cmd = 'Zone'
+    def init() super(self).init() end
     # Handler for zone command
     # zone1 1 -> turn on heating zone 1
     # zone2 0 -> turn off heating zone 2
@@ -1401,7 +1487,7 @@ class zone_command: command
     def on_cmd(cmd, idx, payload, payload_json)
         if !self.cmds_enabled() return end
         var zone = idx-1
-        if zone < api.settings.zones.size()
+        if zone >= 0 && zone < api.settings.zones.size()
             var mode = api.settings.zones.get_mode(zone)
             if isinstance(payload_json, map)
                 self.cmd_set_mode(zone, mode, payload_json)
@@ -1413,9 +1499,11 @@ class zone_command: command
                     self.cmd_set_power(zone, mode, power) 
                 end
             end
+        else
+            self.resp_cmnd(idx, "Zone not found")
+            return
         end
-        var message = string.toupper(string.format('%s%d', cmd, idx))
-        api.resp_cmnd(string.format('{"%s": "DONE"}', message))
+        self.resp_cmnd(idx)
     end
     # Change the operating mode for the zone if different from current mode
     def cmd_set_mode(zone, mode, payload)

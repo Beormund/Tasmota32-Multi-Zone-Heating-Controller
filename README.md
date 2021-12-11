@@ -15,7 +15,8 @@ This heating controller gives independent time control over multiple channels or
 * Individual WS2812 LED pixels can indicate zone status 
 * One physical push button per zone is supported with different actions available via single, double and triple press.
 * Each zone can be put into manual override. Several manual override modes are available (see Operating Modes below)
-* A custom Tasmota "zone" command can be used to turn the zone on/off and switch mode. `zone1 1` turns zone 1 on. `zone1 {"mode": 5}` switches zone 1 to "All Day" mode. `zone2 {"mode": 0}` switches zone 2 to "Auto Mode".
+* A custom Tasmota "zone" command can be used to turn the zone on/off and switch mode (see below). 
+* A custom Tasmota "schedule" command can be used to add/update/delete schedules (see below).
 * If Alexa/Hue emulation is enabled, when the power state of the relay is changed via Alexa (or MQTT or by pressing the Tasmota web UI relay buttons) the relevant heating zone's status is synchronised.
 * A basic I2C LCD 20x4 screen is supported out of the box. The first line displays date/time; the other 3 lines display on/off times for up to 3 zones.
 
@@ -96,7 +97,34 @@ Options can be enabled/disabled by using the Configure Heating web page.
 
 ## Operation
 
-1. Navigate to Configuration | Configure Heating to set zone labels, modes, schedules, and options. Or click on the Zone summary info at the top of the Tasmota Home page.
+Navigate to Configuration | Configure Heating to set zone labels, modes, schedules, and options. Or click on the Zone summary info at the top of the Tasmota Home page.
+
+### Zone Command
+
+`zone1` publishes mqtt info for zone 1
+`zone1 1` turns zone 1 on. Valid values are `on|off|1|0|true|false`  
+
+`zone2 {"mode": 0}` switches zone 2 to "Auto" Mode.  
+`zone3 {"mode": 1, "hours":2}` switches zone 3 to "Boost" mode. "hours" can be 1 or 2.  
+`zone1 {"mode": 2}` switches zone 1 constant on  
+`zone2 {"mode": 3}` switches zone 2 constant off  
+`zone3 {"mode": 4}` switches zone 3 to Advance mode  
+`zone1 {"mode": 5}` switches zone 1 to "All Day" mode.
+
+### Zones command
+
+`zones` publishes mqqt info for all zones
+
+### Schedule Command
+
+`schedule1` publishes mqtt info for schedule1  
+`schedule2 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` updates schedule 2
+`schedule3 delete` deletes schedule 3  
+`schedule4 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` creates schedule 4 if schedule 3 exists but not schedule 4. i.e., to create a new schedule increment the schedule id.
+
+### Schedules Command
+
+`schedules` publishes mqtt info for all schedules
 
 <img src="./screenshots/tasmota_home.png" width="400">
 <img src="./screenshots/manage_heating.png" width="400">
@@ -117,8 +145,6 @@ Options can be enabled/disabled by using the Configure Heating web page.
 The scripts are large and if PSRAM is not present the heap may decrease to a point where the web UI becomes sluggish.
 
 ## Planned Enhancements
-
-If memory and system resources allow, a nice to have would be a "schedule" command to create/update/delete schedules via console/MQTT.
 
 Tasmota Berry now has native support for WS2812 so the pixel indicator functionality will be reworked to make use of this new feature.
 
