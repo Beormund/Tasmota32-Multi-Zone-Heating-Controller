@@ -101,7 +101,7 @@ Navigate to Configuration | Configure Heating to set zone labels, modes, schedul
 
 ### Zone Command
 
-`zone1` publishes mqtt info for zone 1
+`zone1` publishes mqtt info for zone 1  
 `zone1 1` turns zone 1 on. Valid values are `on|off|1|0|true|false`  
 
 `zone2 {"mode": 0}` switches zone 2 to "Auto" Mode.  
@@ -113,12 +113,12 @@ Navigate to Configuration | Configure Heating to set zone labels, modes, schedul
 
 ### Zones command
 
-`zones` publishes mqqt info for all zones
+`zones` publishes mqtt info for all zones
 
 ### Schedule Command
 
 `schedule1` publishes mqtt info for schedule1  
-`schedule2 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` updates schedule 2
+`schedule2 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` updates schedule 2  
 `schedule3 delete` deletes schedule 3  
 `schedule4 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` creates schedule 4 if schedule 3 exists but not schedule 4. i.e., to create a new schedule increment the schedule id.
 
