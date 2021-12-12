@@ -93,22 +93,35 @@ Navigate to **Consoles | Manage File system** and upload the following Tasmota A
 
 [heating.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/blob/main/bin/heating.tapp)
 
+## Operation
+
+Navigate to Configuration | Configure Heating to set zone labels, modes, schedules, and options. Or click on the Zone summary info at the top of the Tasmota Home page.
+
+<img src="./screenshots/tasmota_home.png" width="400">
+<img src="./screenshots/manage_heating.png" width="400">
+<img src="./screenshots/manage_zone.png" width="400">
+<img src="./screenshots/manage_schedule.png" width="400">
+
+* If physical buttons are configured, each button can operate an associated zone as follows. SINGLE press: zone will toggle from Auto to Advance mode. Auto on switches to Advance off and Auto off switches to Advance on etc. DOUBLE press: Zone switches mode in the following order with each double press: Auto -> All Day -> Const On -> Const Off -> Auto. TRIPLE press: mode switches from Auto to Boost (1 hour), or if boost is activated, from Boost to Auto.
+* Ensure that schedule on/off times do not overlap as this may result in unexpected behaviour.
+* If there is a power cut or the microcontroller is restarted, zones will be restored to their last operating mode.
+* If you have an MQTT broker, the following is an example payload that the heating controller publishes when a zone changes state:
+
+```yaml
+17:00:01.609 MQT: wifi2mqtt/Heating-Controller/tele/RESULT = {"Heating":{"Mode":"Auto", "Zone":3, "Until":""2021-12-12T22:30:00", "Power":"On", "Label":"HWTR"}}
+```
+
 ## Options
 
 Options can be enabled/disabled by using the Configure Heating web page.
 
-Option|Notes
-:---|:---
-`LCD`| Enables/Disables a 4x20 LCD dot matrix screen
-`SYNC BTNS`| If enabled the Tasmota Relay Toggle buttons are renamed and kept in sync with heating zone names
-`LED`| If enabled, individual WS2812 LED pixels can act as zone indicators
-`CMD` | If enabled, the zone and schedule commands can be used via the Tasmota Console or MQTT
-`MQTT`| If enabled MQTT telemetry is appended to teleperiod and MQTT heating status messages are published
-
-
-## Operation
-
-Navigate to Configuration | Configure Heating to set zone labels, modes, schedules, and options. Or click on the Zone summary info at the top of the Tasmota Home page.
+| Option    | Notes                                        |
+:-----------|:---------------------------------------------|
+`LCD`       | Enables/Disables a 4x20 LCD dot matrix screen
+`SYNC BTNS` | If enabled the Tasmota Relay Toggle buttons are renamed and kept in sync with heating zone names
+`LED`       | If enabled, individual WS2812 LED pixels can act as zone indicators
+`CMD`       | If enabled, the zone and schedule commands can be used via the Tasmota Console or MQTT
+`MQTT`      | If enabled MQTT telemetry is appended to teleperiod and MQTT heating status messages are published
 
 ## Commands
 
@@ -118,20 +131,6 @@ Command|Parameters
 `zones`| publishes mqtt info for all zones  
 `schedule<x>`| publishes mqtt info for schedule x.<br><br> To update a schedule specify a new payload.<br>Example: `schedule2 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` updates schedule 2<br><br>To delete a schedule use the `delete` param.<br>Example: `schedule3 delete` deletes schedule 3<br><br>To add a new schedule use `schedule0` followed by a new payload<br>Example: `schedule0 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` creates a new schedule. The schedule id will be auto-generated.<br><br>The payload on/off times must be in 24-hour HH:MM format and the off time must be later than the on time. Zones/Days must be a list of 1 or 0 values to indicate if the zones/days are enabled. `"days": [0,1,1,1,1,1,0]` indicates that the schedule should run Mon-Fri. `"zones": [1,1,0]` indicates that zones 1 & 2 are enabled for the schedule.
 `schedules`| publishes mqtt info for all schedules  
-
-<img src="./screenshots/tasmota_home.png" width="400">
-<img src="./screenshots/manage_heating.png" width="400">
-<img src="./screenshots/manage_zone.png" width="400">
-<img src="./screenshots/manage_schedule.png" width="400">
-
-3. If physical buttons are configured, each button can operate an associated zone as follows. SINGLE press: zone will toggle from Auto to Advance mode. Auto on switches to Advance off and Auto off switches to Advance on etc. DOUBLE press: Zone switches mode in the following order with each double press: Auto -> All Day -> Const On -> Const Off -> Auto. TRIPLE press: mode switches from Auto to Boost (1 hour), or if boost is activated, from Boost to Auto.
-4. Ensure that schedule on/off times do not overlap as this may result in unexpected behaviour.
-5. If there is a power cut or the microcontroller is restarted, zones will be restored to their last operating mode.
-6. If you have an MQTT broker, the following is an example payload that the heating controller publishes when a zone changes state:
-
-```yaml
-17:00:01.609 MQT: wifi2mqtt/Heating-Controller3/tele/RESULT = `{"Heating":{"Mode":"Auto","Zone":3,"Until":"22:30 Sun 31 Oct 21","Power":"On","Label":"HWTR"}}`
-```
 
 ## Known Issues
 
