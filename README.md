@@ -93,38 +93,31 @@ Navigate to **Consoles | Manage File system** and upload the following Tasmota A
 
 [heating.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/blob/main/bin/heating.tapp)
 
+## Options
+
 Options can be enabled/disabled by using the Configure Heating web page.
+
+Option|Notes
+:---|:---
+`LCD`| Enables/Disables a 4x20 LCD dot matrix screen
+`SYNC BTNS`| If enabled the Tasmota Relay Toggle buttons are renamed and kept in sync with heating zone names
+`LED`| If enabled, individual WS2812 LED pixels can act as zone indicators
+`CMD` | If enabled, the zone and schedule commands can be used via the Tasmota Console or MQTT
+`MQTT`| If enabled MQTT telemetry is appended to teleperiod and MQTT heating status messages are published
+
 
 ## Operation
 
 Navigate to Configuration | Configure Heating to set zone labels, modes, schedules, and options. Or click on the Zone summary info at the top of the Tasmota Home page.
 
-### Zone Command
+## Commands
 
-`zone1` publishes mqtt info for zone 1  
-`zone1 1` turns zone 1 on. Valid values are `on|off|1|0|true|false`  
-
-`zone2 {"mode": 0}` switches zone 2 to "Auto" Mode.  
-`zone3 {"mode": 1, "hours":2}` switches zone 3 to "Boost" mode. "hours" can be 1 or 2.  
-`zone1 {"mode": 2}` switches zone 1 constant on  
-`zone2 {"mode": 3}` switches zone 2 constant off  
-`zone3 {"mode": 4}` switches zone 3 to Advance mode  
-`zone1 {"mode": 5}` switches zone 1 to "All Day" mode.
-
-### Zones command
-
-`zones` publishes mqtt info for all zones
-
-### Schedule Command
-
-`schedule1` publishes mqtt info for schedule1  
-`schedule2 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` updates schedule 2  
-`schedule3 delete` deletes schedule 3  
-`schedule4 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` creates schedule 4 if schedule 3 exists but not schedule 4. i.e., to create a new schedule increment the schedule id.
-
-### Schedules Command
-
-`schedules` publishes mqtt info for all schedules
+Command|Parameters
+:---|:---
+`zone<x>`| publishes mqtt info for zone x<br>`0/off/false` = turn OFF<br>`1/on/true` = turn ON<br>`{"mode": m}` where m can be:<br>`0` (Auto)<br>`1` (Boost)<br>`2` (Const On)<br>`3` (Const Off)<br>`4` (Adv)<br>`5` (All Day)<br>When m = 1 (boost), specify hours: `{"mode": 1, "hours":2}` "hours" can be 1 or 2<br>Examples:<br>`zone1` (publish mqtt infor for zone 1)<br>`zone1 1` (turn zone 1 ON)<br>`zone2 {"mode": 5}` (switch zone 2 to All Day mode)<br>`zone3 {"mode": 1, "hours": 2}` (boost zone 3 for 2 hours)  
+`zones`| publishes mqtt info for all zones  
+`schedule<x>`| publishes mqtt info for schedule x.<br><br> To update a schedule specify a new payload.<br>Example: `schedule2 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` updates schedule 2<br><br>To delete a schedule use the `delete` param.<br>Example: `schedule3 delete` deletes schedule 3<br><br>To add a new schedule use `schedule0` followed by a new payload<br>Example: `schedule0 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` creates a new schedule. The schedule id will be auto-generated.<br><br>The payload on/off times must be in 24-hour HH:MM format and the off time must be later than the on time. Zones/Days must be a list of 1 or 0 values to indicate if the zones/days are enabled. `"days": [0,1,1,1,1,1,0]` indicates that the schedule should run Mon-Fri. `"zones": [1,1,0]` indicates that zones 1 & 2 are enabled for the schedule.
+`schedules`| publishes mqtt info for all schedules  
 
 <img src="./screenshots/tasmota_home.png" width="400">
 <img src="./screenshots/manage_heating.png" width="400">

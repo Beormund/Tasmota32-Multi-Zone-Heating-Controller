@@ -25,6 +25,9 @@ class api
     static def strftime(format, secs)
         return tasmota.strftime(format, secs)
     end
+    static def strptime(time, format)
+        return tasmota.strptime(time, format)
+    end
     static def rtc()
         return tasmota.rtc()
     end
@@ -439,42 +442,30 @@ class schedule: map
     static def fromjson(m)
         var keys = ["on", "off", "id", "days", "zones"]
         var sched = schedule()
+        var msg = / s -> string.format("Error: %s missing or invalid", s)
         for k: keys
-            assert(m.contains(k), string.format("%s value missing", k))
+            assert(m.contains(k), msg(k))
             if k == 'on' || k == 'off'
-                var message = string.format("%s must be format 'HH:MM'", k)
-                assert(type(m[k]) == 'string', message)
-                assert(size(m[k]) == 5, message)
-                assert(m[k][2] == ':', message)
-                var hours = int(m[k][0..1]), mins = int(m[k][3..4])
-                assert(hours >= 0 && hours < 24, message)
-                assert(mins >= 0 && mins < 60, message)
-                sched[k == 'on' ? schedule.on : schedule.off] = hours*3600+mins*60
+                var t = api.strptime(m[k], '%H:%M')
+                assert(t && t['hour']<24 && t['min']<60, msg(k))
+                sched[k == 'on' ? schedule.on : schedule.off] = t['hour']*3600+t['min']*60
             elif k == 'id'
-                assert(type(m[k]) == 'int', "id must be int")
+                assert(type(m[k]) == 'int', msg(k))
                 sched[schedule.id] = m[k]
             elif k == 'days' || k == 'zones'
-                assert(classname(m[k]) == 'list', string.format("%s must be list", k))
-                assert(
-                    size(m[k]) == (k == 'days' ? 7 : api.settings.zones.size()),
-                    string.format("%s list incorrect size", k)
-                )
-                var t = 0
-                for lk: 0 .. m[k].size()-1
+                assert(classname(m[k]) == 'list', msg(k))
+                var l = k == 'days' ? 7 : api.settings.zones.size()
+                assert(size(m[k]) == l, msg(k))
+                var x = 0
+                for lk: m[k].keys()
                     var v = m[k][lk]
-                    assert(
-                        v == 0 || v == 1, 
-                        string.format("%s list must contain flags 1 or 0", k)
-                    )
-                    if v t+= (1 << lk) end
+                    assert(v == 0 || v == 1, msg(k))
+                    if v x+= (1 << lk) end
                 end
-                sched[k == 'days' ? schedule.days : schedule.zones] = t
+                sched[k == 'days' ? schedule.days : schedule.zones] = x
             end
         end
-        assert(
-            sched[schedule.off] > sched[schedule.on], 
-            "off time must be later than on time"
-        )
+        assert(sched[schedule.off] > sched[schedule.on], msg("on/off times"))
         return sched
     end
     # true if index i of list k (days/zones) is set
@@ -1442,7 +1433,7 @@ class schedule_command: command
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
         if !self.cmds_enabled() return end
-        if idx > 0 && idx <= api.settings.schedules.size()+1
+        if idx >= 0 && idx <= api.settings.schedules.size()+1
             var _dirty = false
             if isinstance(payload_json, map)
                 payload_json.setitem('id', idx)
@@ -1452,15 +1443,15 @@ class schedule_command: command
                     self.resp_cmnd(idx, m)
                     return
                 end
-                if sched[schedule.id] == api.settings.schedules.next_id()
+                if idx == 0
                     _dirty = api.settings.schedules.push(sched)
                 else
                     _dirty = api.settings.schedules.update(sched)
                 end
-            elif string.tolower(payload) == 'delete'
+            elif string.tolower(payload) == 'delete' && idx > 0
                 _dirty = api.settings.schedules.pop(idx)
             elif payload == '' 
-                if idx > api.settings.schedules.size()
+                if idx == 0 || idx > api.settings.schedules.size()
                     self.resp_cmnd(idx, "Schedule not found")
                     return
                 end
