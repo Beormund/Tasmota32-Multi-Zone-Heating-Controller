@@ -86,6 +86,9 @@ class api
     static def publish_result(payload)
         tasmota.publish_result(payload, '')
     end
+    static def set_relay(relay, val)
+        gpio.digital_write(gpio.pin(gpio.REL1, relay), int(val))
+    end
     static def get_relay_count()
         def pin(t, enum)
             while gpio.pin(enum, t) != -1 t+=1 end
@@ -312,7 +315,7 @@ end
 # zone['m'] = mode (6 bit for previous & current)
 # zone['p'] = power (2 bit for auto & override)
 class zone: map
-    static label = 'l', expiry = 'e', mode = 'm', power = 'p'
+    static label = 'l', expiry = 'e', mode = 'm', power = 'p', target = 't', room = 'r'
     var sensor
     def init(o)
         self.sensor = ''
@@ -326,6 +329,24 @@ class zone: map
     def get_mode(p)
         var lsb = p ? 3 : 0, msb = lsb + 2
         return (self[self.mode] >> lsb) & ~(~0 << (msb-lsb+1))
+    end
+    def get_temp(field)
+        return number(self.find(field))
+    end
+    def set_temp(field, temp)
+        temp = number(temp)
+        if temp !=nil
+            self[field] = temp
+        end
+    end
+    def call_for_heat()
+        if !self.get_power(self.get_mode()) return end
+        var target = self.get_temp(self.target)
+        var room = self.get_temp(self.room)
+        if target != nil && room != nil
+            # Low level GPIO control of relays. Bypasses Tasmota
+            api.set_relay(zone, room < target)
+        end
     end
     # Returns the zone's power state. Mode is optional 
     def get_power(m)
@@ -868,6 +889,8 @@ class scheduler
         api.settings.zones.set_zone(zone, stat.mode, stat.power, stat.expiry)
         # Set the power state of the relay
         api.set_power(zone, stat.power)
+        # Check temps and call for heat
+        api.settings.zones[zone].call_for_heat()
         # Update logs, LED, MQTT and LCD screen
         stat.notify()
     end
@@ -900,6 +923,8 @@ class override
     def on_completed(zone)
         var stat = api.settings.zones.get_status(zone)
         api.set_power(zone, stat.power)
+        # Check temps and call for heat
+        api.settings.zones[zone].call_for_heat()
         # Update logs, LED, MQTT and LCD screen
         stat.notify()
         # Force the updated configuration to be saved to flash
@@ -1185,6 +1210,8 @@ class WebManager : Driver
                 var stat = api.settings.zones.get_status(z)
                 # Set the power state of the relay
                 api.set_power(z, stat.power)
+                # Check temps and call for heat
+                api.settings.zones[zone].call_for_heat()
                 # Notify display etc.
                 stat.notify()
             end
@@ -1330,8 +1357,11 @@ class component
         end
     end
     def pop_trigger()
+        self.remove_trigger(api.settings.zones.size())
+    end
+    def remove_trigger(zone)
         api.remove_rule(
-            string.format(self.fmt(), api.settings.zones.size())
+            string.format(self.fmt(), zone+1)
         )
     end
 end
@@ -1481,7 +1511,12 @@ class zone_command: command
         if zone >= 0 && zone < api.settings.zones.size()
             var mode = api.settings.zones.get_mode(zone)
             if isinstance(payload_json, map)
-                self.cmd_set_mode(zone, mode, payload_json)
+                if payload_json.contains('mode')
+                    self.cmd_set_mode(zone, mode, payload_json)
+                end
+                if payload_json.contains('temp') 
+                    self.cmd_set_temp(zone, payload_json['temp'])
+                end
             elif payload == ''
                 api.settings.zones.get_status(zone).pub_mqtt()             
             else
@@ -1496,9 +1531,20 @@ class zone_command: command
         end
         self.resp_cmnd(idx)
     end
+    # Set room/target temperature and change power state accordingly
+    def cmd_set_temp(z, p)
+        var room = number(p.find('room'))
+        var target = number(p.find('target'))
+        if target != nil
+            api.settings.zones[z].set_temp(zone.target, target)
+        end
+        if room != nil 
+            api.settings.zones[z].set_temp(zone.room, room)
+            api.settings.zones[z].call_for_heat()
+        end
+    end
     # Change the operating mode for the zone if different from current mode
     def cmd_set_mode(zone, mode, payload)
-        if !payload.has('mode') return end
         if type(payload['mode']) != 'int' return end
         var to_mode = payload['mode']
         if to_mode < 0 || to_mode > 5 return end
