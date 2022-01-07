@@ -316,7 +316,7 @@ end
 # zone['p'] = power (2 bit for auto & override)
 class zone: map
     static label = 'l', expiry = 'e', mode = 'm', power = 'p', target = 't', room = 'r'
-    var sensor
+    var sensor, sched_target
     def init(o)
         self.sensor = ''
         super(self).init()
@@ -331,6 +331,9 @@ class zone: map
         return (self[self.mode] >> lsb) & ~(~0 << (msb-lsb+1))
     end
     def get_temp(field)
+        if field == self.target && self.sched_target != nil
+            return number(self.sched_target)
+        end
         return number(self.find(field))
     end
     def set_temp(field, temp)
@@ -449,12 +452,21 @@ end
 # schedule['d'] = Days (Sun = 1 << 0, Mon = 1 << 1 etc)
 # schedule['z'] = Zones (ZN1 = 1 << 0, ZN2 = 1 << 1 etd)
 class schedule: map
-    static on = '1', off = '0', id = 'i', days = 'd', zones = 'z'
+    static on = '1', off = '0', id = 'i', days = 'd', zones = 'z', target = 't'
     def init(m)
         super(self).init()
         m = isinstance(m, map) ? m : {"i":0, "1":0, "0":0, "d":0, "z":0}
         for k: m.keys()
             self[k] = m[k]
+        end
+    end
+    def get_target_temp()
+        return number(self.find(self.target))
+    end
+    def set_target_temp(temp)
+        temp = number(temp)
+        if temp !=nil
+            self[self.target] = temp
         end
     end
     # validates if a json payload is in the following format:
@@ -1533,14 +1545,17 @@ class zone_command: command
     end
     # Set room/target temperature and change power state accordingly
     def cmd_set_temp(z, p)
-        var room = number(p.find('room'))
-        var target = number(p.find('target'))
-        if target != nil
-            api.settings.zones[z].set_temp(zone.target, target)
+        var refresh = false
+        def set_temp(t, f)
+            if t != nil && t != api.settings.zones[z].get_temp(f)
+                api.settings.zones[z].set_temp(f, t)
+                refresh = true
+            end
         end
-        if room != nil 
-            api.settings.zones[z].set_temp(zone.room, room)
-            api.settings.zones[z].call_for_heat()
+        set_temp(number(p.find('target')), zone.target)
+        set_temp(number(p.find('room')), zone.room)
+        if refresh 
+            api.settings.zones[z].call_for_heat() 
         end
     end
     # Change the operating mode for the zone if different from current mode
