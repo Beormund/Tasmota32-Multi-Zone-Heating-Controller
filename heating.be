@@ -87,9 +87,7 @@ class api
         tasmota.publish_result(payload, '')
     end
     static def set_relay(relay, val)
-        var pin = gpio.pin(gpio.REL1, relay)
-        gpio.digital_write(pin, val)
-        print("gpio write: pin:", pin, "val:", val)
+        gpio.digital_write(gpio.pin(gpio.REL1, relay), int(val))
     end
     static def get_relay_count()
         def pin(t, enum)
@@ -236,13 +234,12 @@ end
 
 # A status contains information about the current state of a zone
 class status
-    var zone, mode, power, expiry, label, key, state, temp
+    var zone, mode, power, expiry, label, key, state
     # @param zone: index of zone from api.settings.zones
     # @param mode: which mode the zone is currently set to
     # @param power: on/off state of zone
     # @param expiry: next on/off time for auto or expiry for boost
-    # @param target_temp: zone/schedule target temperature
-    def init(zone, mode, power, expiry, temp)
+    def init(zone, mode, power, expiry)
         self.zone = zone
         self.label = api.settings.zones.get_label(self.zone)
         self.mode = mode
@@ -250,7 +247,6 @@ class status
         self.power = power
         self.state = self.power ? 'On' : 'Off'
         self.expiry = expiry
-        self.temp = temp
     end
     # Display max 20 chars: e.g., 'HTG1 off until 16:30'
     def set_lcd()
@@ -320,14 +316,14 @@ end
 # zone['p'] = power (2 bit for auto & override)
 class zone: map
     static label = 'l', expiry = 'e', mode = 'm', power = 'p', target = 't', room = 'r'
-    var sensor, target_temp
+    var sensor, sched_target
     def init(o)
+        self.sensor = ''
         super(self).init()
         o = isinstance(o, map) ? o : {"l": o ,"e": 0, "m": 0, "p": 0}
         for k: o.keys()
             self[k] = o[k]
         end
-        self.sensor = ''
     end
     # Returns the zone's mode (current or previous)
     def get_mode(p)
@@ -335,28 +331,24 @@ class zone: map
         return (self[self.mode] >> lsb) & ~(~0 << (msb-lsb+1))
     end
     def get_temp(field)
+        if field == self.target && self.sched_target != nil
+            return number(self.sched_target)
+        end
         return number(self.find(field))
     end
     def set_temp(field, temp)
         temp = number(temp)
-        self[field] = temp
+        if temp !=nil
+            self[field] = temp
+        end
     end
-    def toggle_target_temp(temp)
-        self.target_temp = temp
-    end
-    def call_for_heat(relay, power)
-        power = power != nil 
-            ? power 
-            : self.get_power(self.get_mode())
-        if !power return end
-        var target = self.target_temp != nil 
-            ? self.target_temp 
-            : self.get_temp(self.target)
+    def call_for_heat()
+        if !self.get_power(self.get_mode()) return end
+        var target = self.get_temp(self.target)
         var room = self.get_temp(self.room)
-        print("relay:", relay, "mode:", self.get_mode(), "target:", target, "room:", room)
         if target != nil && room != nil
             # Low level GPIO control of relays. Bypasses Tasmota
-            api.set_relay(relay, int(room < target))
+            api.set_relay(zone, room < target)
         end
     end
     # Returns the zone's power state. Mode is optional 
@@ -368,9 +360,7 @@ class zone: map
             "Label": self[self.label],
             "Mode": util.modes[self.get_mode()],
             "Power": self.get_power(self.get_mode()) ? "On" : "Off",
-            "Until": api.strftime("%FT%T", self[self.expiry]),
-            "Target Temp": self.get_temp(self.target),
-            "Room Temp": self.get_temp(self.room)
+            "Until": api.strftime("%FT%T", self[self.expiry])
         }
     end
 end
@@ -407,18 +397,6 @@ class zones: list
     def get_mode(z, p)
         return self[z].get_mode(p)
     end
-    def get_temp(z, field)
-        return self[z].get_temp(field)
-    end
-    def set_temp(z, field, temp)
-        self[z].set_temp(field, temp)
-    end
-    def toggle_target_temp(z, temp)
-        self[z].toggle_target_temp(temp)
-    end
-    def call_for_heat(z, power)
-        self[z].call_for_heat(z, power)
-    end
     # Set the mode for a given zone
     def set_mode(z, m)
         var current = self.get_mode(z)
@@ -428,14 +406,11 @@ class zones: list
         end
     end
     # Sets a zone's mode, power and expiry
-    def set_zone(z, m, p, e, t)
+    def set_zone(z, m, p, e)
         self.set_mode(z, m)
         self.set_power(z, p, m)
         if e
             self.set_expiry(z, e)
-        end
-        if t != nil
-            self.toggle_target_temp(z, t)
         end
     end
     # Gets the custom name for the zone
@@ -458,8 +433,7 @@ class zones: list
         var m = self.get_mode(z)
         var p = self.get_power(z, m)
         var e = self.get_expiry(z)
-        var t = self.get_temp(z, zone.target)
-        return status(z, m, p, e, t)
+        return status(z, m, p, e)
     end
     def tojson()
         var m = {}
@@ -491,7 +465,9 @@ class schedule: map
     end
     def set_target_temp(temp)
         temp = number(temp)
-        self[self.target] = temp
+        if temp !=nil
+            self[self.target] = temp
+        end
     end
     # validates if a json payload is in the following format:
     # {"on": "07:00", "off": "12:59", "id":3, "days": [0,1,1,1,1,1,0], "zones":[1,1,0]}
@@ -597,7 +573,6 @@ class schedule: map
     # Does this instance of schedule = another instance?
     def == (o)
         for k: self.keys()
-            if k == schedule.target continue end
             if self[k] != o[k]
                 return false
             end
@@ -613,8 +588,7 @@ class schedule: map
             "off": self.secs2str(self[self.off]),
             "id": self[self.id],
             "days": self.days2list(),
-            "zones": self.zones2list(),
-            "Target Temp": self.get_target_temp()
+            "zones": self.zones2list()
         }
     end
 end
@@ -674,8 +648,7 @@ class schedules : list
                 return false
             else 
                 for k: current.keys()
-                    if k == schedule.target continue end
-                    current[k] = updated[k]
+                     current[k] = updated[k]
                 end
                 return true
             end
@@ -684,24 +657,21 @@ class schedules : list
         end
     end
     # Get a status object for the next schedule
-    def get_next_status(z)
+    def get_next_status(zone)
         import math
         var i = math.imax
         for s: self
-            if s.is_set(s.zones, z)
-                var p = s.is_running(z)
+            if s.is_set(s.zones, zone)
+                var p = s.is_running(zone)
                 var r = s.get_runat(p ? s.off : s.on)
                 if p 
-                    return status(z, 0, true, r, 
-                        s.get_target_temp(schedule.target)
-                    )
+                    return status(zone, 0, true, r)
                 else 
                     i = r < i ? r : i 
                 end
             end
         end
-        var temp = api.settings.zones.get_temp(z, zone.target)
-        return status(z, 0, false, i, temp)
+        return status(zone, 0, false, i)
     end
     # Gets the schedule with the earliest on time for day
     def get_first_on(zone, day)
@@ -928,11 +898,11 @@ class scheduler
     def on_completed(zone)
         var stat = util.config.get_next_status(zone)
         # Update the power and expiry/next run time for the zone
-        api.settings.zones.set_zone(zone, stat.mode, stat.power, stat.expiry, stat.temp)
+        api.settings.zones.set_zone(zone, stat.mode, stat.power, stat.expiry)
         # Set the power state of the relay
         api.set_power(zone, stat.power)
         # Check temps and call for heat
-        api.settings.zones.call_for_heat(zone, stat.power)
+        api.settings.zones[zone].call_for_heat()
         # Update logs, LED, MQTT and LCD screen
         stat.notify()
     end
@@ -966,7 +936,7 @@ class override
         var stat = api.settings.zones.get_status(zone)
         api.set_power(zone, stat.power)
         # Check temps and call for heat
-        api.settings.zones.call_for_heat(zone, stat.power)
+        api.settings.zones[zone].call_for_heat()
         # Update logs, LED, MQTT and LCD screen
         stat.notify()
         # Force the updated configuration to be saved to flash
@@ -1005,7 +975,7 @@ class override
     # Swtich zone to timer mode
     def auto(zone)
         var stat = api.settings.schedules.get_next_status(zone)
-        api.settings.zones.set_zone(zone, 0, stat.power, stat.expiry, stat.temp)
+        api.settings.zones.set_zone(zone, 0, stat.power, stat.expiry)
     end
     # Switch zone permanently on
     def on(zone)
@@ -1253,7 +1223,7 @@ class WebManager : Driver
                 # Set the power state of the relay
                 api.set_power(z, stat.power)
                 # Check temps and call for heat
-                api.settings.zones.call_for_heat(z, stat.power)
+                api.settings.zones[zone].call_for_heat()
                 # Notify display etc.
                 stat.notify()
             end
@@ -1508,21 +1478,17 @@ class schedule_command: command
         if idx >= 0 && idx <= api.settings.schedules.size()+1
             var _dirty = false
             if isinstance(payload_json, map)
-                if idx > 0 && payload_json.contains('temp') 
-                    self.cmd_set_temp(idx, payload_json['temp'])
-                else 
-                    payload_json.setitem('id', idx)
-                    var sched
-                    try sched = schedule.fromjson(payload_json)
-                    except 'assert_failed' as e, m
-                        self.resp_cmnd(idx, m)
-                        return
-                    end
-                    if idx == 0
-                        _dirty = api.settings.schedules.push(sched)
-                    else
-                        _dirty = api.settings.schedules.update(sched)
-                    end
+                payload_json.setitem('id', idx)
+                var sched
+                try sched = schedule.fromjson(payload_json)
+                except 'assert_failed' as e, m
+                    self.resp_cmnd(idx, m)
+                    return
+                end
+                if idx == 0
+                    _dirty = api.settings.schedules.push(sched)
+                else
+                    _dirty = api.settings.schedules.update(sched)
                 end
             elif string.tolower(payload) == 'delete' && idx > 0
                 _dirty = api.settings.schedules.pop(idx)
@@ -1540,23 +1506,6 @@ class schedule_command: command
         end
         self.resp_cmnd(idx)
     end
-    # Set schedule target temperature 
-    def cmd_set_temp(idx, p)
-        var sched = api.settings.schedules.get(idx)
-        var temp = number(p.find('target'))
-        if sched != nil && temp != nil 
-            if temp != sched.get_target_temp()
-                sched.set_target_temp(temp)
-                # For each zone check if schedule is running and test temps
-                for z: api.settings.zones.keys()
-                    if sched.is_running(z)
-                        api.settings.zones.toggle_target_temp(z, temp)
-                        api.settings.zones.call_for_heat(z, true)
-                    end
-                end
-            end
-        end
-    end
 end
 
 class zone_command: command
@@ -1565,11 +1514,9 @@ class zone_command: command
     # Handler for zone command
     # zone1 1 -> turn on heating zone 1
     # zone2 0 -> turn off heating zone 2
-    # The zone will be switched into an appropriate mode
     # zone3 {"mode": 5} -> If not in Day mode, switch to Day mode
     # zone3 {"mode": 1, "hours": 2} -> Boost zone 3 for 2 hours
-    # The zone's target/room temperature will be updated
-    # zone3 {"temp":{"target": 22, "room": 21}}    
+    # The zone will be switched into an appropriate mode
     def on_cmd(cmd, idx, payload, payload_json)
         if !self.cmds_enabled() return end
         var zone = idx-1
@@ -1580,7 +1527,7 @@ class zone_command: command
                     self.cmd_set_mode(zone, mode, payload_json)
                 end
                 if payload_json.contains('temp') 
-                    self.cmd_set_temp(zone, mode, payload_json['temp'])
+                    self.cmd_set_temp(zone, payload_json['temp'])
                 end
             elif payload == ''
                 api.settings.zones.get_status(zone).pub_mqtt()             
@@ -1596,26 +1543,19 @@ class zone_command: command
         end
         self.resp_cmnd(idx)
     end
-    # Set room/target temperature and trigger temperature comparison
-    def cmd_set_temp(z, m, p)
-        var power, temp
+    # Set room/target temperature and change power state accordingly
+    def cmd_set_temp(z, p)
+        var refresh = false
         def set_temp(t, f)
             if t != nil && t != api.settings.zones[z].get_temp(f)
-                api.settings.zones.set_temp(z, f, t)
-                temp = t
-            end            
+                api.settings.zones[z].set_temp(f, t)
+                refresh = true
+            end
         end
         set_temp(number(p.find('target')), zone.target)
-        if temp != nil
-            # If the zone is ON and in Override mode then toggle
-            power = api.settings.zones.get_power(z, m)
-            if m && power
-                api.settings.zones.toggle_target_temp(z, temp)                
-            end            
-        end
         set_temp(number(p.find('room')), zone.room)
-        if temp
-            api.settings.zones.call_for_heat(z, power) 
+        if refresh 
+            api.settings.zones[z].call_for_heat() 
         end
     end
     # Change the operating mode for the zone if different from current mode
