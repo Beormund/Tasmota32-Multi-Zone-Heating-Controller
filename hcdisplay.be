@@ -17,7 +17,7 @@
 #  ------------------------------------------------------------------------------------------------------
 
 
-var display = module('display')
+var hcdisplay = module('hcdisplay')
 
 #  ------------------------------------------------------------------------------------
 #  This is the driver for the Liquid Crystal LCD displays that use the I2C bus.
@@ -111,26 +111,26 @@ class lcd_i2c
         self.expand_write(self.backlight)
         tasmota.delay(1)
         # We start in 8bit mode, try to set 4 bit mode
-	self.write4bits(0x03 << 4)
+	    self.write4bits(0x03 << 4)
         # Wait min 4 ms
         tasmota.delay(5)
         # second try
-	self.write4bits(0x03 << 4)
-	tasmota.delay(5) # wait min 4.1ms
+	    self.write4bits(0x03 << 4)
+	    tasmota.delay(5) # wait min 4.1ms
     	# third go!
-	self.write4bits(0x03 << 4)
+	    self.write4bits(0x03 << 4)
     	tasmota.delay(1)
         # set to 4-bit interface
         self.write4bits(0x02 << 4)
         # Set lines, font size, etc.
-	self.command(self.LCD_FUNCTIONSET | displayfunction)
+	    self.command(self.LCD_FUNCTIONSET | displayfunction)
         # Turn the display on with no cursor or blinking default
-	self.displaycontrol = self.LCD_DISPLAYON | self.LCD_CURSOROFF | self.LCD_BLINKOFF
+	    self.displaycontrol = self.LCD_DISPLAYON | self.LCD_CURSOROFF | self.LCD_BLINKOFF
     	self.display()
         # Clear the screen
         self.clear()
         # Initialize to default text direction (for roman languages)
-	self.displaymode = self.LCD_ENTRYLEFT | self.LCD_ENTRYSHIFTDECREMENT
+	    self.displaymode = self.LCD_ENTRYLEFT | self.LCD_ENTRYSHIFTDECREMENT
         # Set the entry mode
         self.command(self.LCD_ENTRYMODESET | self.displaymode)
         # Set cursor position to zero
@@ -166,21 +166,21 @@ class lcd_i2c
     end
     # Turns the underline cursor on/off
     def no_cursor()
-	self.displaycontrol &= ~self.LCD_CURSORON
+	    self.displaycontrol &= ~self.LCD_CURSORON
 	self.command(self.LCD_DISPLAYCONTROL | self.displaycontrol)
     end
     def cursor()
-	self.displaycontrol |= self.LCD_CURSORON
+	    self.displaycontrol |= self.LCD_CURSORON
 	self.command(self.LCD_DISPLAYCONTROL | self.displaycontrol)
     end
     # Turn on and off the blinking cursor
     def no_blink()
-	self.displaycontrol &= ~self.LCD_BLINKON
+	    self.displaycontrol &= ~self.LCD_BLINKON
 	self.command(self.LCD_DISPLAYCONTROL | self.displaycontrol)
     end
     def blink()
-	self.displaycontrol |= self.LCD_BLINKOFF
-	self.command(self.LCD_DISPLAYCONTROL | self.displaycontrol)
+	    self.displaycontrol |= self.LCD_BLINKOFF
+	    self.command(self.LCD_DISPLAYCONTROL | self.displaycontrol)
     end
     # This is for text that flows Left to Right
     def display_left()
@@ -288,5 +288,5 @@ class lcd_i2c
     end
 end
 
-display.lcd_i2c = lcd_i2c
-return display
+hcdisplay.lcd_i2c = lcd_i2c
+return hcdisplay

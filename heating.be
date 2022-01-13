@@ -21,7 +21,8 @@ var heating = module('heating')
 # All tasmota calls are accessed via api class
 class api
     static wd = tasmota.wd
-    static settings = persist    
+    static settings = persist
+    static WS2812 = gpio.pin(gpio.WS2812, 1) 
     static def strftime(format, secs)
         return tasmota.strftime(format, secs)
     end
@@ -124,17 +125,17 @@ class util
     ]
     # Set indicator color for each mode
     static colors = [
-        '00FF00', # Green
-        '800080', # Purple
-        '088F8F', # Dark Cyan
-        'FF00FF', # Magenta
-        '0000FF', # Blue
-        'FFFF00'  # Yellow
+        0x00FF00, # Green
+        0x800080, # Purple
+        0x088F8F, # Dark Cyan
+        0xFF00FF, # Magenta
+        0x0000FF, # Blue
+        0xFFA500  # Yellow
     ]
     # --------------------------------------------------------------------------------------------------
     # LCD:  Enable basic support for I2C LCD 20x4/20x2 display (default: false)
     # CMD:  Enable Tasmota/MQTT "zone" command to change a zone's mode (default: true)
-    # LED:  Enable addressable LED indicator lights (WS2812 pin needs to be set) (default: false)
+    # LED:  Enable addressable LED indicator lights (WS2812 pin needs to be set) (default: true)
     # SYNC: Enable Tasmota UI toggle button names to be kept in sync with zone names (default: false)
     # MQTT: Enable the publishing of MQTT heating zone telemetry (default: true)
     # --------------------------------------------------------------------------------------------------
@@ -156,6 +157,8 @@ class util
     }
     # See screen class for further details. HeatingController initialises the lcd
     static lcd = nil
+    # Enabled access to WS2812 LEDs
+    static WS2812 = nil
     # Enable easy access to config. HeatingController initialises the config
     static config = nil
     # Enable access to override capability. HeatingController initialises
@@ -199,7 +202,7 @@ end
 class screen
     var lcd
     def init()
-        self.lcd = display.lcd_i2c()
+        self.lcd = hcdisplay.lcd_i2c()
     end
     def power(bool)
         self.lcd.set_backlight(bool)
@@ -255,8 +258,9 @@ class status
     # WS2812 LED (1 pixel per zone) indicator
     def set_led()
         if !util.config.is_option_set(util.options['LED']) return end
-        var color = self.power ? util.colors[self.mode] : 'FF0000'
-        api.cmd(string.format('Led%d #%s', self.zone+1, color))
+        var color = self.power ? util.colors[self.mode] : 0xFF0000
+        util.WS2812.set_pixel_color(self.zone, color)
+        util.WS2812.show()
     end
     # Publish this status as an MQTT message
     def pub_mqtt()
@@ -707,31 +711,37 @@ class config
             return api.settings.schedules.get_next_status(zone)
         end
     end
-    # If sync_webbuttons is true set the relay toggle button to label
-    def set_webbutton(btn, label)
-        # Don't set the quasi Light/WS2812 button; only relays...
-        if btn > api.get_relay_count() return end 
-        api.cmd(string.format('webbutton%d %s', btn, label))
-    end
-    def set_webbuttons()
-        for z: api.settings.zones.keys()
-            self.set_webbutton(z+1, api.settings.zones.get_label(z))
-        end
-    end
     # Returns true if option set (use static option enumeration)
-    # E.g., is_option_set(option.MQTT)
+    # E.g., is_option_set(util.option['MQTT'])
     def is_option_set(opt) 
         return !!(api.settings.options & opt)
     end
     # Enable/disable an option
-    # E.g., set_option(options.MQTT, true)
+    # E.g., set_option(util.options['MQTT'], true)
     def set_option(opt, set)
         api.settings.options ^= (-int(set) ^ api.settings.options) & opt
+        self.configure_option(opt, set, true)
+    end
+    def configure_option(opt, set, configure)
+        if opt == util.options['LCD']
+            set ? util.config.enable_display(configure) : util.config.disable_display()
+        elif opt == util.options['LED']
+            set ? util.config.enable_leds(configure) : util.config.disable_leds()
+        elif opt == util.options['SYNC BTNS'] && set
+            util.config.set_webbuttons()
+        end
+    end
+    # Configures options - called by config.load()
+    def configure_options()
+        for opt: util.options
+            self.configure_option(opt, self.is_option_set(opt))
+        end
     end
     # If LCD option is set, enable the screen
-    def enable_display()
+    def enable_display(configure)
         if !util.lcd 
             util.lcd = screen()
+            if !configure return end
             util.lcd.start_clock()
             # Update zone info
             for z: api.settings.zones.keys()
@@ -748,6 +758,37 @@ class config
             util.lcd = nil
         end
     end
+    # Do not call before load() as pixel count needs zone size
+    def enable_leds(configure)        
+        if api.WS2812 != -1 && api.settings.has('zones')
+            var pixels = api.settings.zones.size()
+            util.WS2812 = Leds(pixels, api.WS2812)
+            if !configure return end
+            for z: api.settings.zones.keys()
+                api.settings.zones.get_status(z).set_led()
+            end
+        else
+            # WS2812 not configured so disable LED option
+            self.set_option(util.options['LED'], false)
+        end
+    end
+    def disable_leds()
+        if util.WS2812
+            util.WS2812.clear()
+            util.WS2812 = nil
+        end
+    end
+    # If sync_webbuttons is true set the relay toggle button to label
+    def set_webbutton(btn, label)
+        # Don't set the quasi Light/WS2812 button; only relays...
+        if btn > api.get_relay_count() return end 
+        api.cmd(string.format('webbutton%d %s', btn, label))
+    end
+    def set_webbuttons()
+        for z: api.settings.zones.keys()
+            self.set_webbutton(z+1, api.settings.zones.get_label(z))
+        end
+    end
     # Saves the configuration to _persist.json
     def save()
         api.settings.save()
@@ -756,9 +797,6 @@ class config
     # If _persist.json does not contain the data default
     # options, zones, and schedules are created.
     def load()
-        if !api.settings.has('options')
-            api.settings.options = 16 # CMD enabled
-        end
         if api.settings.has('zones')
             # Need to convert from a list to zones sub-class
             api.settings.zones = zones(api.settings.zones)
@@ -781,6 +819,11 @@ class config
                 {"i": 3, "1": 27000, "0": 37800, "d": 65, "z": sum},
                 {"i": 4, "1": 61200, "0": 82800, "d": 65, "z": sum}
             ])
+        end
+        if !api.settings.has('options')
+            api.settings.options = 22 # CMD/LED/MQTT enabled
+        else
+            self.configure_options()
         end
     end
 end
@@ -1264,9 +1307,6 @@ class WebManager : Driver
             var new = webserver.has_arg(k)
             if current != new
                 util.config.set_option(util.options[k], new)
-                if k == 'LCD'
-                    new ? util.config.enable_display() : util.config.disable_display()
-                end
             end
         end
     end
@@ -1543,16 +1583,8 @@ class HeatingController
     def init()
         # Create the configuration capability
         util.config = config()
-        # Load persisted label, zone and schedule data
+        # Load persisted zones, schedules and options
         util.config.load()
-        # If sync_webbuttons is set, update relay toggle buttons
-        if util.config.is_option_set(util.options['SYNC BTNS'])
-            util.config.set_webbuttons()
-        end
-        # If use_lcd is set, create a minute ticker to display the time
-        if util.config.is_option_set(util.options['LCD'])
-            util.lcd = screen() 
-        end
         # Create the override capability
         util.override = override()
         # Create the scheduler capability
