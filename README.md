@@ -45,15 +45,15 @@ This heating controller was tested with Tasmota32.bin
 
 ### 2. Configure Template
 
-Using the Tasmota web UI, navigate to **Configuration | Configure Other**. Paste the following json template into the Template field. Tick "Activate" checkbox and "Save". You may need to adjust the template to match the number of relays you have attached.
+Using the Tasmota web UI, navigate to **Configuration | Configure Other**. Paste the following json template into the Template field. Tick "Activate" checkbox and "Save". You may need to adjust the template to match the number of components you have attached.
 
 ```json
-{"NAME":"Tasmota ESP32","GPIO":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1376,0,640,608,224,0,225,226,32,0,0,0,0,33,34,1,1,1,0,0,1],"FLAG":0,"BASE":1}
+{"NAME":"Tasmota ESP32","GPIO":[1,1,1,1,1,1,1,1,1,1377,1,1,1,1,1,0,0,640,608,224,0,225,226,32,0,0,0,0,33,34,1,1,1,0,0,1],"FLAG":0,"BASE":1}
 ```
 
 The above template configures the GPIO pins as follows:
 
-* GPIO19 - WS2812
+* GPIO13 - WS2812 2
 * GPIO21 - I2C SDA 1
 * GPIO22 - I2C SCL 1
 * GPIO23 - Relay 1
@@ -134,9 +134,9 @@ Command|Parameters
 
 ## Known Issues
 
-The scripts are large and if PSRAM is not present the heap may decrease to a point where the web UI becomes sluggish.
+Please report any problems using Github Issues.
 
 ## Planned Enhancements
 
-Tasmota Berry now has native support for WS2812 so the pixel indicator functionality will be reworked to make use of this new feature.
+Implement custom command to update options. Implement new LVGL touch display driver. Support thermostat set temp/room sensor input (this will require berry Hue/Alexa & virtual relay integration). 
 
