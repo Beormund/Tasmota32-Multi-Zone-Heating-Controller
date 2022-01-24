@@ -21,7 +21,6 @@ import string
 import json
 import webserver
 import persist
-import hcdisplay
 import heating
 
 # Initialise heating controller

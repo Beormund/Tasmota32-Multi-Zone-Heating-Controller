@@ -6,7 +6,7 @@
         "</form><p />"
     ],
     "zone": [
-        "<script type='text/javascript'>function shd() {var bst = document.getElementById('Boost');var dvd = document.getElementById('dv_d');dvd.style.display = bst.checked ? 'block' : 'none';}</script><form method='post' action='/hm'><input type='hidden' name='z' value='%d'/><fieldset><legend>Zone %d</legend><div style='text-align:center'><label for='label'>Label: </label><input style='width:auto' type='text' name='label' value='%s' id='label' maxlength='4'><div style='text-align:center;padding: 10px 0px;'>",
+        "<script type='text/javascript'>function shd() {var bst = document.getElementById('Boost');var dvd = document.getElementById('dv_d');dvd.style.display = bst.checked ? 'block' : 'none';}</script><form method='post' action='/hm'><input type='hidden' name='z' value='%d'/><fieldset><legend>Zone %d</legend><div style='text-align:center'><label for='label'>Label: </label><input style='width:auto' type='text' name='label' value='%s' id='label' maxlength='6'><div style='text-align:center;padding: 10px 0px;'>",
         "<input type='radio' id='%s' name='modes[]' value='%d' %s onclick='shd()'><label for='%s'>%s</label>",
         "</div><div style='display:none;text-align:center' id='dv_d'><input type='radio' id='1hr' name='hours[]' value='1' checked><label for='1hr'>1 Hour</label><input type='radio' id='2hrs' name='hours[]' value='2'><label for='2hrs'>2 Hours</label></div>",
         "<div><button class='button bgrn' type='button' onclick='window.location=\"/hm\";'>Cancel</button></div><div><button name='%s' class='button bgrn' type='submit'>Save</button></div>",

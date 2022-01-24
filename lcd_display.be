@@ -17,7 +17,7 @@
 #  ------------------------------------------------------------------------------------------------------
 
 
-var hcdisplay = module('hcdisplay')
+var lcd_display = module('lcd_display')
 
 #  ------------------------------------------------------------------------------------
 #  This is the driver for the Liquid Crystal LCD displays that use the I2C bus.
@@ -288,5 +288,42 @@ class lcd_i2c
     end
 end
 
-hcdisplay.lcd_i2c = lcd_i2c
-return hcdisplay
+class screen
+    var util, lcd
+    def init(util)
+        self.util = util
+        self.lcd = lcd_i2c()
+        self.lcd.write_line("Starting...", 1)
+    end
+    def power(bool)
+        self.lcd.set_backlight(bool)
+    end
+    def update_clock(formatter)
+        self.lcd.write_line(formatter('%H:%M %a %d %b %y'), 1)
+    end
+    def update_zone(status)
+        if status.zone > 2 return end
+        var fmt = 12&(1<<status.mode) ? "%s %s Const" : '%s %s until %%R'
+        var args = [fmt, status.label, status.state]
+        self.lcd.write_line(status.format(args), status.zone+2)
+    end
+    def clear_zone(zone)
+        self.lcd.write_line('', zone+2)
+    end
+    def clear()
+        self.lcd.clear()
+    end
+    def start_clock()
+        self.lcd.write_line('', 1)
+        var callback = / formatter -> self.update_clock(formatter)
+        var millis = / now -> 60000-now['sec']*1000
+        self.util.set_time(callback)
+        self.util.set_timer(millis, callback, 'lcd_ticker', true)
+    end
+    def stop_clock()
+        self.util.remove_timer('lcd_ticker')
+    end
+end
+
+lcd_display.screen = screen
+return lcd_display
