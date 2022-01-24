@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This is a multi-zone heating controller written in the Berry scripting language designed to run on an ESP32 microcontroller running the latest Tasmota32.bin development branch firmware.
+This is a multi-zone heating controller written in the Berry scripting language designed to run on an ESP32 microcontroller running the latest Tasmota32.bin development branch firmware (or Tasmota32-lvgl.bin if you are using an LVGL touch screen).
 
 This heating controller gives independent time control over multiple channels or "zones" (1 zone per relay) on a 7 day weekly programme. Each channel/zone can have any number of programmed on/off schedules. 
 
@@ -18,9 +18,17 @@ This heating controller gives independent time control over multiple channels or
 * A custom Tasmota "zone" command can be used to turn the zone on/off and switch mode (see below). 
 * A custom Tasmota "schedule" command can be used to add/update/delete schedules (see below).
 * If Alexa/Hue emulation is enabled, when the power state of the relay is changed via Alexa (or MQTT or by pressing the Tasmota web UI relay buttons) the relevant heating zone's status is synchronised.
-* A basic I2C LCD 20x4 screen is supported out of the box. The first line displays date/time; the other 3 lines display on/off times for up to 3 zones.
+* Two types of display are supported: 1) A basic HD44780 20x4 I2C LCD, or 2) a 320x240 SPI ILI9341 with XPT2046 touch controller. If either of these devices is attached and correctly configured the heating controller will detect and use the appropriate display. NB for the touch screen the latest pre-compiled tassmota32-lvgl.bin development firmware is required. Before installing the heating controller app the touch screen should be calibrated using the [calibration app](https://github.com/arendst/Tasmota/pull/14459). Both screens can display up to 3 zones.
 
-<img src="screenshots/lcd.jpg" width="400">
+ILI9341 / XP2046 Display (using Tasmota32-lvgl.bin firmware)
+
+<img src="screenshots/lvgl_display1.png" width="200">
+<img src="screenshots/lvgl_display2.png" width="200">
+
+
+Basic 4x20 HD44780 Display (using tasmota32.bin firmware)
+
+<img src="screenshots/4x20lcd.png" width="400">
 
 ### Operating Modes
 
@@ -41,7 +49,7 @@ Download the latest Tasmota ESP32 development branch firmware from:
 
 <http://ota.tasmota.com/tasmota32/>
 
-This heating controller was tested with Tasmota32.bin 
+This heating controller was tested with Tasmota32.bin and Tasmota32-lvgl.bin (for touch screen support).
 
 ### 2. Configure Template
 
@@ -117,8 +125,8 @@ Options can be enabled/disabled by using the Configure Heating web page.
 
 | Option    | Notes                                        |
 :-----------|:---------------------------------------------|
-`LCD`       | Enables/Disables a 4x20 LCD dot matrix screen
-`SYNC BTNS` | If enabled the Tasmota Relay Toggle buttons are renamed and kept in sync with heating zone names
+`DISPLAY`       | Enables/Disables a configured display
+`SYNC` | If enabled the Tasmota Relay Toggle buttons are renamed and kept in sync with heating zone names
 `LED`       | If enabled, individual WS2812 LED pixels can act as zone indicators
 `CMD`       | If enabled, the zone and schedule commands can be used via the Tasmota Console or MQTT
 `MQTT`      | If enabled MQTT telemetry is appended to teleperiod and MQTT heating status messages are published
@@ -138,5 +146,5 @@ Please report any problems using Github Issues.
 
 ## Planned Enhancements
 
-Implement custom command to update options. Implement new LVGL touch display driver. Support thermostat set temp/room sensor input (this will require berry Hue/Alexa & virtual relay integration). 
+Implement custom command to update options. Support thermostat set temp/room sensor input (this will require berry Hue/Alexa & virtual relay integration). 
 
