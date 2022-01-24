@@ -759,11 +759,11 @@ class config
     end
     def configure_option(opt, set, configure)
         if opt == util.options['DISPLAY']
-            set ? util.config.enable_display(configure) : util.config.disable_display()
+            set ? self.enable_display(configure) : self.disable_display()
         elif opt == util.options['LED']
-            set ? util.config.enable_leds(configure) : util.config.disable_leds()
+            set ? self.enable_leds(configure) : self.disable_leds()
         elif opt == util.options['SYNC'] && set
-            util.config.set_webbuttons()
+            self.set_webbuttons()
         end
     end
     # Configures options - called by config.load()
@@ -875,9 +875,8 @@ class config
         end
         if !api.settings.has('options')
             api.settings.options = 22 # CMD/LED/MQTT enabled
-        else
-            self.configure_options()
         end
+        self.configure_options()
     end
 end
 
