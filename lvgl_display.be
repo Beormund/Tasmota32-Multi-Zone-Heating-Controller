@@ -2,22 +2,33 @@ var lvgl_display = module('lvgl_display')
 
 lv.start()
 
+# keep a global reference as berry allocates
+# memory as immortal for lvgl styles. This
+# avoids memory leaks.
+var gs, bs, zs, ns, ms
+
 class touchscreen
-    var util, zone_count
-    # The screen members
-    var screen
-    # The style members
-    var heating_style, banner_style, zone_style, name_style, mode_style
-    # The grid memnbers
+    # Constructor members
+    var util
+    var wifi
+    # Grid memnbers
     var grid
-    # The banner members
-    var banner, font20, datetime, wifi_icon
-    # The panel members
-    var panels, colors, modes_str, zones
+    var col_dsc
+    var row_dsc
+    # Banner members
+    var banner
+    var font20 
+    var datetime 
+    var wifi_icon
+    # Panel members
+    var panels
+    var colors 
+    var modes_str
+    var zones
     # Constructor
-    def init(util, zone_count)
-        self.zone_count = zone_count && zone_count > 3 ? 3 : zone_count
+    def init(util, wifi)
         self.util = util
+        self.wifi = wifi
         self.modes_str = util.modes.concat('\n')
         self.font20 = lv.montserrat_font(20)
         self.panels = []
@@ -51,74 +62,80 @@ class touchscreen
             lv.palette_main(bool ? lv.PALETTE_BLUE : lv.PALETTE_RED), 0
         )
     end
-    def set_screen()
-        self.screen = lv.scr_act()
-        self.screen.set_style_bg_color(lv.color_white(), 0)
-        self.screen.set_style_bg_grad_color(lv.palette_main(lv.PALETTE_GREY), 0)
-        self.screen.set_style_bg_grad_dir(lv.GRAD_DIR_VER, 0)
-    end
     def set_styles()
         # Main container style
-        self.heating_style = lv.style()
-        self.heating_style.set_bg_opa(0)
-        self.heating_style.set_border_width(0)
-        self.heating_style.set_pad_top(0)
-        self.heating_style.set_pad_bottom(10)
+        if gs != nil return end
+        gs = lv.style()
+        gs.set_bg_color(lv.color_white(),0)
+        gs.set_bg_grad_color(lv.palette_main(lv.PALETTE_GREY), 0)
+        gs.set_bg_grad_dir(lv.GRAD_DIR_VER, 0)
+        gs.set_radius(0)
+        gs.set_border_width(0)
+        gs.set_pad_top(0)
+        gs.set_pad_bottom(10)
         # Top banner style
-        self.banner_style = lv.style()
-        self.banner_style.set_text_font(self.font20)
-        self.banner_style.set_border_side(lv.BORDER_SIDE_BOTTOM)
-        self.banner_style.set_bg_opa(lv.OPA_TRANSP)
-        self.banner_style.set_border_width(1)
-        self.banner_style.set_border_color(lv.palette_main(lv.PALETTE_GREY))
-        self.banner_style.set_text_color(lv.palette_darken(lv.PALETTE_GREY, 1))
-        self.banner_style.set_pad_left(0)
-        self.banner_style.set_pad_right(0)
-        self.banner_style.set_pad_top(12)
-        self.banner_style.set_pad_bottom(0)
+        if bs != nil return end
+        bs = lv.style()
+        bs.set_text_font(self.font20)
+        bs.set_border_side(lv.BORDER_SIDE_BOTTOM)
+        bs.set_bg_opa(lv.OPA_TRANSP)
+        bs.set_border_width(1)
+        bs.set_border_color(lv.palette_main(lv.PALETTE_GREY))
+        bs.set_text_color(lv.palette_darken(lv.PALETTE_GREY, 1))
+        bs.set_pad_left(0)
+        bs.set_pad_right(0)
+        bs.set_pad_top(12)
+        bs.set_pad_bottom(0)
         # Zone panel style
-        self.zone_style = lv.style()
-        self.zone_style.set_radius(15)
-        self.zone_style.set_bg_opa(190)
-        self.zone_style.set_border_width(0)
-        self.zone_style.set_pad_left(0)
-        self.zone_style.set_pad_right(0)
-        self.zone_style.set_pad_row(7)
+        if zs != nil return end
+        zs = lv.style()
+        zs.set_radius(15)
+        zs.set_border_width(0)
+        zs.set_pad_left(0)
+        zs.set_pad_right(0)
+        zs.set_pad_row(7)
+        # if resolution is 480x320 increase font size
+        if lv.get_hor_res() == 480
+            zs.set_text_font(self.font20)
+        end
         # Heating zone name style
-        self.name_style = lv.style()
-        self.name_style.set_bg_opa(lv.OPA_COVER)
-        self.name_style.set_radius(15)
-        self.name_style.set_pad_left(5)
-        self.name_style.set_pad_right(5)
-        self.name_style.set_pad_top(3)
-        self.name_style.set_pad_bottom(3)
-        self.name_style.set_bg_color(lv.palette_main(lv.PALETTE_GREY))
-        self.name_style.set_text_color(lv.color_white())
+        if ns != nil return end
+        ns = lv.style()
+        ns.set_bg_opa(lv.OPA_COVER)
+        ns.set_radius(15)
+        ns.set_pad_left(5)
+        ns.set_pad_right(5)
+        ns.set_pad_top(3)
+        ns.set_pad_bottom(3)
+        ns.set_bg_color(lv.palette_main(lv.PALETTE_GREY))
+        ns.set_text_color(lv.color_white())
         # Heating zone mode style
-        self.mode_style = lv.style()
-        self.mode_style.set_bg_opa(lv.OPA_TRANSP)
-        self.mode_style.set_pad_left(0)
-        self.mode_style.set_pad_right(0)
-        self.mode_style.set_pad_top(0)
-        self.mode_style.set_pad_bottom(0)
-        self.mode_style.set_width(60)
-        self.mode_style.set_height(16)
-        self.mode_style.set_border_width(0)
+        if ms != nil return end
+        ms = lv.style()
+        ms.set_bg_opa(lv.OPA_TRANSP)
+        ms.set_pad_left(0)
+        ms.set_pad_right(0)
+        ms.set_pad_top(0)
+        ms.set_pad_bottom(0)
+        ms.set_width(60)
+        ms.set_border_width(0)
     end
     def set_grid()
-        var col_dsc = lv.coord_arr([90, 90, 90, lv.GRID_TEMPLATE_LAST])
-        var row_dsc = lv.coord_arr([40, 177, lv.GRID_TEMPLATE_LAST])
-        self.grid = lv.obj(self.screen)
+        # Resize the panels to fit different screen resolutions
+        var fr = lv.grid_fr(10)
+        self.col_dsc = lv.coord_arr([fr, fr, fr, lv.GRID_TEMPLATE_LAST])
+        self.row_dsc = lv.coord_arr([40, fr, lv.GRID_TEMPLATE_LAST])
+        self.grid = lv.obj(lv.scr_act())
         self.grid.set_grid_align(lv.GRID_ALIGN_SPACE_BETWEEN, lv.GRID_ALIGN_SPACE_BETWEEN)
-        self.grid.set_grid_dsc_array(col_dsc, row_dsc)
+        self.grid.set_grid_dsc_array(self.col_dsc, self.row_dsc)
         self.grid.set_size(lv.get_hor_res(), lv.get_ver_res())
         self.grid.center()
-        self.grid.add_style(self.heating_style, 0)
+        self.grid.add_style(gs, 0)
     end
     def set_banner()
         # Create the banner container - which is a line
         self.banner = lv.line(self.grid)
-        self.banner.add_style(self.banner_style, 0)
+        self.banner.add_style(bs, 0)
         self.banner.set_grid_cell(lv.GRID_ALIGN_STRETCH, 0, 3, lv.GRID_ALIGN_STRETCH, 0, 1)
         # Create the banner labels and widgets
         self.datetime = lv.label(self.banner)
@@ -127,30 +144,31 @@ class touchscreen
         self.wifi_icon = lv.label(self.banner)
         self.wifi_icon.set_align(lv.ALIGN_RIGHT_MID)
         self.wifi_icon.set_text(lv.SYMBOL_WIFI)
-        var color = self.util.wifi_connected ? lv.PALETTE_BLUE : lv.PALETTE_RED 
+        var color = self.wifi.connected ? lv.PALETTE_BLUE : lv.PALETTE_RED 
         self.wifi_icon.set_style_text_color(lv.palette_main(color), 0)
         # subscribe to wifi notifications
-        self.util.add_wifi_cb(/ bool ->self.wifi_connected(bool), 'wifi')
+        self.wifi.add_cb(/ c ->self.wifi_connected(c), 'wifi')
     end
     def set_panels()
         for z: 0 .. 2
             var p = lv.obj(self.grid)
-            p.add_style(self.zone_style, 0)
+            p.add_style(zs, 0)
             p.set_style_bg_color(lv.palette_lighten(self.colors[z], 3), 0)
             p.set_flex_flow(lv.FLEX_FLOW_COLUMN)
             p.set_flex_align(lv.FLEX_ALIGN_START, lv.FLEX_ALIGN_CENTER, lv.FLEX_ALIGN_CENTER)
             p.set_grid_cell(lv.GRID_ALIGN_STRETCH, z, 1, lv.GRID_ALIGN_STRETCH, 1, 1)
+            p.set_scrollbar_mode(0)
             self.panels.push(p)
         end
     end
     def set_zone(z)
         self.zones[z] = {}
         self.zones[z]['label'] = lv.label(self.panels[z])
-        self.zones[z]['label'].add_style(self.name_style, 0)
+        self.zones[z]['label'].add_style(ns, 0)
         self.zones[z]['mode'] = lv.dropdown(self.panels[z])
         self.zones[z]['mode'].set_symbol(nil)
         self.zones[z]['mode'].set_dir(z<2 ? lv.DIR_RIGHT : lv.DIR_LEFT)
-        self.zones[z]['mode'].add_style(self.mode_style, 0)
+        self.zones[z]['mode'].add_style(ms, 0)
         self.zones[z]['mode'].set_options_static(self.modes_str)
         self.zones[z]['mode'].add_event_cb(
             / o,e -> self.dropdown_changed_cb(o, e), 
@@ -164,7 +182,7 @@ class touchscreen
         self.zones[z]['switch'].set_style_bg_color(lv.palette_main(self.colors[2]), 0)
         self.zones[z]['switch'].add_event_cb(
             / o,e -> self.switch_clicked_cb(o, e), 
-            lv.EVENT_ALL, 
+            lv.EVENT_VALUE_CHANGED, 
             z
         )
     end
@@ -193,7 +211,6 @@ class touchscreen
         end
     end
     def start()
-        self.set_screen()
         self.set_styles()
         self.set_grid()
         self.set_banner()
@@ -213,8 +230,8 @@ class touchscreen
     end
     def clear()
         lv.scr_load(lv.obj(0))
-        self.util.remove_wifi_cb('wifi')
-        self.screen.del()
+        self.wifi.remove_cb('wifi')
+        self.grid.del()
     end
     def power(bool)
         var disp = tasmota.get_power().size()

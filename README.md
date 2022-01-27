@@ -18,12 +18,12 @@ This heating controller gives independent time control over multiple channels or
 * A custom Tasmota "zone" command can be used to turn the zone on/off and switch mode (see below). 
 * A custom Tasmota "schedule" command can be used to add/update/delete schedules (see below).
 * If Alexa/Hue emulation is enabled, when the power state of the relay is changed via Alexa (or MQTT or by pressing the Tasmota web UI relay buttons) the relevant heating zone's status is synchronised.
-* Two types of display are supported: 1) A basic HD44780 20x4 I2C LCD, or 2) a 320x240 SPI ILI9341 with XPT2046 touch controller. If either of these devices is attached and correctly configured the heating controller will detect and use the appropriate display. NB for the touch screen the latest pre-compiled tassmota32-lvgl.bin development firmware is required. Before installing the heating controller app the touch screen should be calibrated using the [calibration app](https://github.com/arendst/Tasmota/pull/14459). Both screens can display up to 3 zones.
+* Two types of display are supported: 1) A basic HD44780 20x4 I2C LCD, or 2) a 320x240/480x320 SPI ILI9341 or similar with XPT2046 touch controller. If either of these devices is attached and correctly configured the heating controller will detect and use the appropriate display. NB for the touch screen the latest pre-compiled tassmota32-lvgl.bin development firmware is required. Before installing the heating controller app the touch screen should be calibrated using the [calibration app](https://github.com/arendst/Tasmota/pull/14459). Both screens can display up to 3 zones. The display is not enabled by default so you will need to enable the option on the Configure Heating page.
 
 ILI9341 / XP2046 Display (using Tasmota32-lvgl.bin firmware)
 
-<img src="screenshots/lvgl_display1.png" width="200">
-<img src="screenshots/lvgl_display2.png" width="200">
+<img src="screenshots/lvgl_display1.png" width="400">
+<img src="screenshots/lvgl_display2.png" width="400">
 
 
 Basic 4x20 HD44780 Display (using tasmota32.bin firmware)
@@ -53,7 +53,7 @@ This heating controller was tested with Tasmota32.bin and Tasmota32-lvgl.bin (fo
 
 ### 2. Configure Template
 
-Using the Tasmota web UI, navigate to **Configuration | Configure Other**. Paste the following json template into the Template field. Tick "Activate" checkbox and "Save". You may need to adjust the template to match the number of components you have attached.
+Using the Tasmota web UI, navigate to **Configuration | Configure Other**. Paste the following json template into the Template field. Tick "Activate" checkbox and "Save". You may need to adjust the template to match the number of components you have attached, and whether you are using I2C or SPI screen etc.
 
 ```json
 {"NAME":"Tasmota ESP32","GPIO":[1,1,1,1,1,1,1,1,1,1377,1,1,1,1,1,0,0,640,608,224,0,225,226,32,0,0,0,0,33,34,1,1,1,0,0,1],"FLAG":0,"BASE":1}

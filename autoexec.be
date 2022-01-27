@@ -25,5 +25,3 @@ import heating
 
 # Initialise heating controller
 var hc = heating.controller()
-# Start the heating controller
-hc.start()

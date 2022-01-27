@@ -69,6 +69,9 @@ class api
     static def add_rule(trigger, func)
         tasmota.add_rule(trigger, func)
     end
+    static def add_driver(inst)
+        tasmota.add_driver(inst)
+    end
     static def remove_rule(trigger)
         tasmota.remove_rule(trigger)
     end
@@ -96,51 +99,55 @@ class api
     end
 end
 
+# Enables consumers to subscribe to wifi status changes
+class wifi
+   # Is wifi connected? Used by displays
+   static connected
+   # Used to hold wifi notification callbacks
+   static callbacks
+   # Next set of functions help notify consumers of wifi status changes
+   static def set_status(bool)
+       wifi.connected = bool
+       wifi.notify()
+   end
+   # Notify all callbacks of change of wifi status
+   static def notify()
+       if !wifi.callbacks return end
+       var i = 0
+       while i < size(wifi.callbacks)
+           wifi.callbacks[i].cb(wifi.connected)
+           i += 1
+       end
+   end
+   # Add wifi callbacks
+   static def add_cb(cb, id)
+       class wc
+           var cb, id
+           def init(cb, id)
+               self.cb = cb
+               self.id = id
+           end
+       end
+       if !wifi.callbacks
+           wifi.callbacks = []
+       end
+       wifi.callbacks.push(wc(cb, id))
+   end
+   # Remove wifi callbacks
+   static def remove_cb(id)
+       if !wifi.callbacks return end
+       var i = 0
+       while i < size(wifi.callbacks)
+           if wifi.callbacks[i].id == id
+               wifi.callbacks.remove(i) 
+           else
+               i += 1
+           end
+       end
+   end
+end
+
 class util
-    # Is wifi connected? Used by displays
-    static wifi_connected
-    # Used to hold wifi notification callbacks
-    static wifi_callbacks
-    # Next set of functions help notify consumers of wifi status changes
-    static def set_wifi_status(bool)
-        util.wifi_connected = bool
-        util.wifi_notify()
-    end
-    # Notify all callbacks of change of wifi status
-    static def wifi_notify()
-        if !util.wifi_callbacks return end
-        var i = 0
-        while i < size(util.wifi_callbacks)
-            util.wifi_callbacks[i].cb(util.wifi_connected)
-            i += 1
-        end
-    end
-    # Add wifi callbacks
-    static def add_wifi_cb(cb, id)
-        class wifi_callback
-            var cb, id
-            def init(cb, id)
-                self.cb = cb
-                self.id = id
-            end
-        end
-        if !util.wifi_callbacks
-            util.wifi_callbacks = []
-        end
-        util.wifi_callbacks.push(wifi_callback(cb, id))
-    end
-    # Remove wifi callbacks
-    static def remove_wifi_cb(id)
-        if !util.wifi_callbacks return end
-        var i = 0
-        while i < size(util.wifi_callbacks)
-            if util.wifi_callbacks[i].id == id
-                util.wifi_callbacks.remove(i) 
-            else
-                i += 1
-            end
-        end
-    end
     # Weekday names. Sun = 0, Sat = 6
      static days = [
         'Sun', # 1 << 0
@@ -209,8 +216,8 @@ class util
     static override = nil
     # Enable access to scheduler capability. HeatingController initialises
     static scheduler = nil
-    # Enable access to web manager capability. HeatingController initialises
-    static web_manager = nil
+    # Enable access to tasmota driver capability. HeatingController initialises
+    static driver = nil
     # The buttons class handles button clicks (1 button per heating zone)
     static buttons = nil
     # The relays class handles relay power state changes
@@ -766,7 +773,7 @@ class config
             self.set_webbuttons()
         end
     end
-    # Configures options - called by config.load()
+    # Configures options - called by HeatingController on startup
     def configure_options()
         for opt: util.options
             self.configure_option(opt, self.is_option_set(opt))
@@ -787,7 +794,7 @@ class config
                 hc_display = _d
             end
             path.pop()
-            util.scr = hc_display.screen(util, api.settings.zones.size())
+            util.scr = hc_display.screen(util, wifi)
             if !configure return end
             util.scr.start_clock()
             # Update zone info
@@ -876,7 +883,6 @@ class config
         if !api.settings.has('options')
             api.settings.options = 22 # CMD/LED/MQTT enabled
         end
-        self.configure_options()
     end
 end
 
@@ -1105,7 +1111,7 @@ class override
 end
 
 # Display Schedule Summary/Editor in 'Configure Heating'
-class ScheduleGUI
+class schedule_ui
     # Get list of day indices
     # bits 30 -> [-MTWT--]
     def bits2days(bits)
@@ -1178,7 +1184,7 @@ class ScheduleGUI
 end
 
 # Displays zone sumarry/editor widgets in 'Configure Heating'
-class ZoneGUI
+class zone_ui
     # Shows a list of zones with status info
     def show_zones(html)
         webserver.content_send(html[0])
@@ -1217,7 +1223,7 @@ class ZoneGUI
 end
 
 # Displays options in 'Configure Heating'
-class OptionsUI
+class options_ui
     def show_options(html)
         webserver.content_send(html[0])
         for k: util.options.keys()
@@ -1228,32 +1234,7 @@ class OptionsUI
     end
 end
 
-# HTTP driver for "Configure Heating" page
-class WebManager : Driver
-    var html, button
-    def init()
-        self.html = util.load_file('html.json')
-        self.button = self.html['button']
-        self.html = nil
-    end
-    # Displays a "Configure Heating" button on the configuration page
-    def web_add_config_button()
-        webserver.content_send(self.button)
-    end
-    def web_sensor()
-        var msg = ''
-        var z = 0
-        while z < size(api.settings.zones)
-            msg += api.settings.zones[z].sensor
-            z += 1
-        end
-        api.web_send(msg)
-    end
-    def json_append()
-        var jsonstr = json.dump(api.settings.zones.tojson())
-        var msg = ",\"Heating\":" .. jsonstr
-        api.response_append(msg)
-    end
+class http_manager
     # Hydrate a schedule object for a new/update action
     def tosched(id)
         var s = schedule()
@@ -1390,31 +1371,30 @@ class WebManager : Driver
             end
         end
     end
-    # This HTTP GET manager controls which web controls are displayed
-    def page_heating_mgr()
+    #  Determines which widgets are displayed
+    def on_http_get()
         if !webserver.check_privileged_access() return nil end
-        if !self.html self.html = util.load_file('html.json') end
+        var html = util.load_file('html.json')
         webserver.content_start('Configure Heating')
         webserver.content_send_style()
         if webserver.has_arg('id')
-            var gui = ScheduleGUI()
-            gui.show_schedules(self.html['sched-sum'])
-            gui.show_editor(int(webserver.arg('id')), self.html['sched'])
+            var gui = schedule_ui()
+            gui.show_schedules(html['sched-sum'])
+            gui.show_editor(int(webserver.arg('id')), html['sched'])
         elif webserver.has_arg('zid')
-            var gui = ZoneGUI()
-            gui.show_zones(self.html['zone-sum'])
-            gui.show_editor(int(webserver.arg('zid')), self.html['zone'])
+            var gui = zone_ui()
+            gui.show_zones(html['zone-sum'])
+            gui.show_editor(int(webserver.arg('zid')), html['zone'])
         else
-            ZoneGUI().show_zones(self.html['zone-sum'])
-            ScheduleGUI().show_schedules(self.html['sched-sum'])
-            OptionsUI().show_options(self.html['options'])
+            zone_ui().show_zones(html['zone-sum'])
+            schedule_ui().show_schedules(html['sched-sum'])
+            options_ui().show_options(html['options'])
         end
         webserver.content_button(webserver.BUTTON_CONFIGURATION)
         webserver.content_stop()
-        self.html = nil
     end
-    # This HTTP POST manager handles the submitted web form data
-    def page_heating_ctl()
+    # Handles data submitted by web widgets
+    def on_http_post()
         if webserver.has_arg('z')
             self.update_zone(int(webserver.arg('z')))
         elif webserver.has_arg('s') 
@@ -1424,14 +1404,49 @@ class WebManager : Driver
         elif webserver.has_arg('o')
             self.update_options()
         end
-        self.page_heating_mgr()
+        self.on_http_get()
         # Force the updated configuration to be saved to flash
         util.config.save()
     end
+end
+
+class driver
+    var button
+    def init()
+        self.button = util.load_file('html.json')['button']
+    end
+    # Displays a "Configure Heating" button on the configuration page
+    def web_add_config_button()
+        webserver.content_send(self.button)
+    end
+    # Called by Tasmota home page to display sensor info
+    def web_sensor()
+        var msg = ''
+        var z = 0
+        while z < size(api.settings.zones)
+            msg += api.settings.zones[z].sensor
+            z += 1
+        end
+        api.web_send(msg)
+    end
+    # Called by Tasmota on teleperiod
+    def json_append()
+        var jsonstr = json.dump(api.settings.zones.tojson())
+        var msg = ",\"Heating\":" .. jsonstr
+        api.response_append(msg)
+    end
     # Add HTTP POST and GET handlers
     def web_add_handler()
-        webserver.on('/hm', / -> self.page_heating_mgr(), webserver.HTTP_GET)
-        webserver.on('/hm', / -> self.page_heating_ctl(), webserver.HTTP_POST)
+        webserver.on('/hm', / -> self.http_get(), webserver.HTTP_GET)
+        webserver.on('/hm', / -> self.http_post(), webserver.HTTP_POST)
+    end
+    def http_get()
+        var web = http_manager()
+        web.on_http_get()
+    end
+    def http_post()
+        var web = http_manager()
+        web.on_http_post()
     end
 end
 
@@ -1664,23 +1679,33 @@ end
 # The main class for setting up the heating controller
 class HeatingController
     def init()
+        self._start()
+    end
+    # Start the heating controller
+    def _start()
         # Create the configuration capability
         util.config = config()
         # Load persisted zones, schedules and options
         util.config.load()
+        # Register commands
+        util.commands['zone'] = zone_command()
+        util.commands['zones'] = zones_command()
+        util.commands['schedule'] = schedule_command()
+        util.commands['schedules'] = schedules_command()
+        # Restoe configuration options
+        util.config.configure_options()
         # Create the override capability
         util.override = override()
         # Create the scheduler capability
         util.scheduler = scheduler()
-        # Create the web driver capability
-        util.web_manager = WebManager()
-    end
-    # Start the heating controller
-    def start()
+        # Create a tasmota driver
+        util.driver = driver()
+        # Register the tasmota driver
+        api.add_driver(util.driver)
         # Fires when wifi connects
-        api.add_rule("Wifi#Connected", /-> util.set_wifi_status(true))
+        api.add_rule("Wifi#Connected", /-> wifi.set_status(true))
         # Fires when wifi disconnects
-        api.add_rule("Wifi#Disconnected", /-> util.set_wifi_status(false))
+        api.add_rule("Wifi#Disconnected", /-> wifi.set_status(false))
         # Fires when RTC has initialized 
         api.add_rule('Time#Initialized', /  -> self.time_initialized())
         # Fires when MQTT has connected
@@ -1689,13 +1714,6 @@ class HeatingController
         util.buttons = buttons()
         # Register power state change triggers
         util.relays = relays()
-        # Register commands.
-        util.commands['zone'] = zone_command()
-        util.commands['zones'] = zones_command()
-        util.commands['schedule'] = schedule_command()
-        util.commands['schedules'] = schedules_command()
-        # Load the web driver
-        tasmota.add_driver(util.web_manager)
     end
     # Called once the RTC is initialized (Time#Initialized)
     def time_initialized()
