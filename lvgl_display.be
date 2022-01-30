@@ -211,6 +211,7 @@ class touchscreen
         end
     end
     def start()
+        self.power(true)
         self.set_styles()
         self.set_grid()
         self.set_banner()
@@ -232,10 +233,11 @@ class touchscreen
         lv.scr_load(lv.obj(0))
         self.wifi.remove_cb('wifi')
         self.grid.del()
+        self.power(false)
     end
     def power(bool)
-        var disp = tasmota.get_power().size()
-        tasmota.set_power(disp-1, bool)
+        import display
+        display.dimmer(bool ? 100 : 0)
     end
 end
 

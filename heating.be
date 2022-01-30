@@ -232,12 +232,12 @@ class util
     static def set_timer(millis, callback, id, repeat)
         var now = api.now()
         api.set_timer(
-            millis(now), 
-            def() 
-                callback(/fmt -> api.strftime(fmt, now['local'])) 
-                if !repeat return end 
-                util.set_timer(millis, callback, id, repeat) 
-            end, 
+            millis(now),
+            def()
+                util.set_time(callback)
+                if !repeat return end
+                util.set_timer(millis, callback, id, repeat)
+            end,
             id
         )
     end

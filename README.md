@@ -85,6 +85,10 @@ Detach Buttons from Relays
 
 `setoption73 1`
 
+Disable useless internal chip temperature readings
+
+`SetSensor127 0`
+
 If you intend to use Alexa/Hue emulation, set friendly names for the relays:
 
 `backlog FriendlyName1 Zone 1; FriendlyName2 Zone 2; FriendlyName3 Hot Water; FriendlyName4 $LED; Emulation 2`

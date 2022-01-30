@@ -293,6 +293,7 @@ class screen
     def init(util)
         self.util = util
         self.lcd = lcd_i2c()
+        self.power(true)
         self.lcd.write_line("Starting...", 1)
     end
     def power(bool)
@@ -312,6 +313,7 @@ class screen
     end
     def clear()
         self.lcd.clear()
+        self.power(false)
     end
     def start_clock()
         self.lcd.write_line('', 1)
