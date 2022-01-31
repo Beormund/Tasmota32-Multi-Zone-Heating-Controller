@@ -29,9 +29,6 @@ antiburn.init = def (m)
                 self.cycle(0)
             end
         end
-        def touched(o, e)
-            self.stop()
-        end
         def cycle(i)
             if !self.running return end
             if i < 30 && self.running
