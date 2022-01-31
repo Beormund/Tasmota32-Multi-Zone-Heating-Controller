@@ -5,16 +5,15 @@ antiburn.init = def (m)
         var scr_original
         var scr_antiburn
         var running
-        var colors
+        static colors = [
+            0x000000,
+            0xff0000,
+            0x00ff00,
+            0x0000ff,
+            0xffffff
+        ]
         def init()
             self.running = false
-            self.colors = [
-                0x000000,
-                0xff0000,
-                0x00ff00,
-                0x0000ff,
-                0xffffff
-            ]
         end
         def start()
             if self.running 
