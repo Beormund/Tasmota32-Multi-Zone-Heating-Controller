@@ -325,6 +325,9 @@ class screen
     def stop_clock()
         self.util.remove_timer('lcd_ticker')
     end
+    def antiburn()
+        # Not implemented
+    end
 end
 
 lcd_display.screen = screen
