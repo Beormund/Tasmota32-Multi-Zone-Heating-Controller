@@ -7,66 +7,14 @@ lv.start()
 # avoids memory leaks.
 var gs, bs, zs, ns, ms
 
-class antiburn
-    var scr_original
-    var scr_antiburn
-    var running
-    var colors
-    var util
-    def init(util)
-        self.util = util
-        self.running = false
-        self.colors = [
-            0x000000,
-            0xff0000,
-            0x00ff00,
-            0x0000ff,
-            0xffffff
-        ]
-    end
-    def start()
-        if self.running 
-            return
-        else
-            self.scr_original = lv.scr_act()
-            self.scr_antiburn = lv.obj(0)
-            lv.scr_load(self.scr_antiburn)
-            self.scr_antiburn.add_event_cb(/->self.stop(), lv.EVENT_PRESSED, 0)
-            self.running = true
-            self.cycle(0)
-        end
-    end
-    def touched(o, e)
-        self.stop()
-    end
-    def cycle(i)
-        if !self.running return end
-        if i < 30 && self.running
-            self.scr_antiburn.set_style_bg_color(lv.color_hex(self.colors[i % 5]), 0)
-            self.util.set_timer(/->1000, /->self.cycle(i+1))
-        else
-            self.stop()
-        end
-    end
-    def stop()
-        if self.running && self.scr_antiburn != nil
-            lv.scr_load(self.scr_original)
-            self.running = false
-            self.scr_antiburn.del()
-            self.scr_antiburn = nil
-        end    
-    end
-end
-
 class touchscreen
     # Constructor members
     var util
     var wifi
     # Grid memnbers
     var grid
-    var coord_arr
-    # antiburn
-    var antiburner
+    var col_dsc
+    var row_dsc
     # Banner members
     var banner
     var font20 
@@ -84,7 +32,6 @@ class touchscreen
         self.modes_str = util.modes.concat('\n')
         self.font20 = lv.montserrat_font(20)
         self.panels = []
-        self.coord_arr = []
         self.colors = [
             lv.PALETTE_BLUE, 
             lv.PALETTE_GREEN, 
@@ -176,11 +123,11 @@ class touchscreen
     def set_grid()
         # Resize the panels to fit different screen resolutions
         var fr = lv.grid_fr(10)
-        self.coord_arr.push(lv.coord_arr([fr, fr, fr, lv.GRID_TEMPLATE_LAST]))
-        self.coord_arr.push(lv.coord_arr([40, fr, lv.GRID_TEMPLATE_LAST]))
+        self.col_dsc = lv.coord_arr([fr, fr, fr, lv.GRID_TEMPLATE_LAST])
+        self.row_dsc = lv.coord_arr([40, fr, lv.GRID_TEMPLATE_LAST])
         self.grid = lv.obj(lv.scr_act())
         self.grid.set_grid_align(lv.GRID_ALIGN_SPACE_BETWEEN, lv.GRID_ALIGN_SPACE_BETWEEN)
-        self.grid.set_grid_dsc_array(self.coord_arr[0], self.coord_arr[1])
+        self.grid.set_grid_dsc_array(self.col_dsc, self.row_dsc)
         self.grid.set_size(lv.get_hor_res(), lv.get_ver_res())
         self.grid.center()
         self.grid.add_style(gs, 0)
@@ -284,9 +231,6 @@ class touchscreen
     end
     def clear()
         lv.scr_load(lv.obj(0))
-        if self.antiburner
-            self.antiburner.stop()
-        end
         self.wifi.remove_cb('wifi')
         self.grid.del()
         self.power(false)
@@ -294,12 +238,6 @@ class touchscreen
     def power(bool)
         import display
         display.dimmer(bool ? 100 : 0)
-    end
-    def antiburn()
-        if !self.antiburner
-            self.antiburner = antiburn(self.util)
-        end
-        self.antiburner.start()
     end
 end
 

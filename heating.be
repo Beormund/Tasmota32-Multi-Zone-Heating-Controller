@@ -1541,18 +1541,6 @@ class command
     end
 end
 
-class antiburn_command: command
-    static cmd = 'Antiburn'
-    def init() super(self).init() end
-    def on_cmd()
-        if !self.cmds_enabled() return end
-        if util.scr
-            util.scr.antiburn()
-        end
-        self.resp_cmnd()
-    end
-end
-
 class zones_command: command
     static cmd = 'Zones'
     def init() super(self).init() end
@@ -1704,7 +1692,6 @@ class HeatingController
         util.commands['zones'] = zones_command()
         util.commands['schedule'] = schedule_command()
         util.commands['schedules'] = schedules_command()
-        util.commands['antiburn'] = antiburn_command()
         # Restoe configuration options
         util.config.configure_options()
         # Create the override capability
