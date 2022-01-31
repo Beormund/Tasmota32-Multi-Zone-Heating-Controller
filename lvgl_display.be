@@ -66,8 +66,8 @@ class touchscreen
         # Main container style
         if gs != nil return end
         gs = lv.style()
-        gs.set_bg_color(lv.color_white(),0)
-        gs.set_bg_grad_color(lv.palette_main(lv.PALETTE_GREY), 0)
+        gs.set_bg_color(lv.color_black(),0)
+        gs.set_bg_grad_color(lv.palette_main(lv.PALETTE_ORANGE), 0)
         gs.set_bg_grad_dir(lv.GRAD_DIR_VER, 0)
         gs.set_radius(0)
         gs.set_border_width(0)
@@ -80,8 +80,8 @@ class touchscreen
         bs.set_border_side(lv.BORDER_SIDE_BOTTOM)
         bs.set_bg_opa(lv.OPA_TRANSP)
         bs.set_border_width(1)
-        bs.set_border_color(lv.palette_main(lv.PALETTE_GREY))
-        bs.set_text_color(lv.palette_darken(lv.PALETTE_GREY, 1))
+        bs.set_border_color(lv.palette_main(lv.PALETTE_ORANGE))
+        bs.set_text_color(lv.palette_main(lv.PALETTE_GREY))
         bs.set_pad_left(0)
         bs.set_pad_right(0)
         bs.set_pad_top(12)

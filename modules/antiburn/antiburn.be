@@ -30,7 +30,7 @@ antiburn.init = def (m)
         end
         def cycle(i)
             if !self.running return end
-            if i < 30 && self.running
+            if i < 30
                 self.scr_antiburn.set_style_bg_color(lv.color_hex(self.colors[i % 5]), 0)
                 tasmota.set_timer(1000, /->self.cycle(i+1))
             else
