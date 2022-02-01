@@ -1541,6 +1541,36 @@ class command
     end
 end
 
+class options_command: command
+    static cmd = "HeatingOptions"
+    def init() super(self).init() end
+    def on_cmd(cmd, idx, payload, payload_json)
+        if !self.cmds_enabled() return end
+        if payload_json && isinstance(payload_json, map)
+            for k: payload_json.keys()
+                var option = util.options.find(string.toupper(k))
+                if option
+                    var new = util.cmd_params.find(string.tolower(str(payload_json[k])))
+                    var current = util.config.is_option_set(option)
+                    if new != nil && current != new
+                        util.config.set_option(option, new)
+                    end
+                else
+                    self.resp_cmnd(idx, "ERROR: Invalid option name")
+                    return
+                end
+            end
+        elif payload == ''
+            var m = {}
+            for k: util.options.keys()
+                m[k] = util.config.is_option_set(util.options[k]) ? 1 : 0
+            end
+            api.publish_result(json.dump({self.cmd: m}))
+        end
+        self.resp_cmnd()
+    end
+end
+
 class zones_command: command
     static cmd = 'Zones'
     def init() super(self).init() end
@@ -1587,7 +1617,7 @@ class schedule_command: command
                 _dirty = api.settings.schedules.pop(idx)
             elif payload == '' 
                 if idx == 0 || idx > api.settings.schedules.size()
-                    self.resp_cmnd(idx, "Schedule not found")
+                    self.resp_cmnd(idx, "ERROR: Schedule not found")
                     return
                 end
                 var json = json.dump({
@@ -1692,6 +1722,7 @@ class HeatingController
         util.commands['zones'] = zones_command()
         util.commands['schedule'] = schedule_command()
         util.commands['schedules'] = schedules_command()
+        util.commands['options'] = options_command()
         # Restoe configuration options
         util.config.configure_options()
         # Create the override capability

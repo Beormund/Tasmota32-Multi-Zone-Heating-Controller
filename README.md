@@ -143,6 +143,7 @@ Command|Parameters
 `zones`| publishes mqtt info for all zones  
 `schedule<x>`| publishes mqtt info for schedule x.<br><br> To update a schedule specify a new payload.<br>Example: `schedule2 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` updates schedule 2<br><br>To delete a schedule use the `delete` param.<br>Example: `schedule3 delete` deletes schedule 3<br><br>To add a new schedule use `schedule0` followed by a new payload<br>Example: `schedule0 {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}` creates a new schedule. The schedule id will be auto-generated.<br><br>The payload on/off times must be in 24-hour HH:MM format and the off time must be later than the on time. Zones/Days must be a list of 1 or 0 values to indicate if the zones/days are enabled. `"days": [0,1,1,1,1,1,0]` indicates that the schedule should run Mon-Fri. `"zones": [1,1,0]` indicates that zones 1 & 2 are enabled for the schedule.
 `schedules`| publishes mqtt info for all schedules  
+`HeatingOptions` | When no json payload is specified the command returns the current settings for all options: `{"HeatingOptions":{"CMD":1,"LED":1,"DISPLAY":1,"SYNC":1,"MQTT":1}}`. 1 indicates enabled; 0 indicates disabled. To set 1 or more options use a json payload and specify the option name as string and 0/off/false to turn option off or 1/on/true to turn option on. E.g., `heatingoptions {"LED": 1, "Display": 1}`
 
 ## Known Issues
 
@@ -150,5 +151,5 @@ Please report any problems using Github Issues.
 
 ## Planned Enhancements
 
-Implement custom command to update options. Support thermostat set temp/room sensor input (this will require berry Hue/Alexa & virtual relay integration). 
+Support thermostat set temp/room sensor input (this will require berry Hue/Alexa & virtual relay integration) which is on the roadmap. 
 
