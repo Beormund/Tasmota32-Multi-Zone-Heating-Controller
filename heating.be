@@ -226,7 +226,8 @@ class util
     static commands = {}
     # Calls a function passing in a time formatter
     static def set_time(callback)
-        callback(/fmt -> api.strftime(fmt, api.now()['local']))
+        var t = api.now()['local']
+        callback(/fmt-> api.strftime(fmt, t), t)
     end
     # Used to create timers for override boost and displaying time
     static def set_timer(millis, callback, id, repeat)
@@ -890,32 +891,26 @@ end
 # A timer is set for the on time and reset to the off time when it pops.
 class scheduler
     var running
+    var schedules
     def init()
         self.running = false
+        self.schedules = []
     end
     def start()
         var s = 0
         while s < size(api.settings.schedules)
-            self.set_timer(api.settings.schedules[s])
+            self.run_schedule(api.settings.schedules[s])
             s += 1
         end
+        var millis = / now -> 60000-now['sec']*1000
+        var callback = / formatter, local -> self.on_tick(formatter, local)
+        util.set_timer(millis, callback, 'scheduler', true)
         self.on_start()
     end
     def stop()
         self.running = false
-        api.remove_timer('schedule')
-    end
-    def set_timer(s)
-        # Get the time now in seconds
-        var now = api.rtc()['local']
-        # Is the schedule switching on or off?
-        var power = s.is_running()
-        # Get the next run time depending on power state
-        var runat = s.get_runat(power ? s.off : s.on)
-        # Timers are set in millis (add 1 second safety margin)
-        var millis = (runat+1 - now) * 1000
-        # Call on_pop when the timer expires
-        api.set_timer(millis, / -> self.on_pop(s), 'schedule')
+        self.schedules.clear()
+        api.remove_timer('scheduler')
     end
     # This method is only used when the scheduler is first run.
     # It retrieves statuses for next auto mode run times
@@ -933,6 +928,28 @@ class scheduler
             end
             z += 1
         end
+    end
+    def on_tick(formatter, local)
+        var i = 0
+        while i < size(self.schedules)
+            if self.schedules[i]['runat'] <= local
+                var id = self.schedules[i]['id']
+                self.schedules.remove(i)
+                self.on_pop(api.settings.schedules.get(id))
+            else
+                i+=1
+            end
+        end
+    end
+    def run_schedule(s)
+        # Get the time now in seconds
+        var now = api.rtc()['local']
+        # Is the schedule switching on or off?
+        var power = s.is_running()
+        # Get the next run time depending on power state
+        var runat = s.get_runat(power ? s.off : s.on)
+        # Call on_pop when the timer expires
+        self.schedules.push({"id": s[schedule.id], "runat": runat})
     end
     # Called when a schedule on or off time expires/completes
     def on_pop(s)
@@ -970,7 +987,7 @@ class scheduler
         # Force the updated configuration to be saved to flash
         util.config.save()
         # Set the schedule's next switching timer
-        self.set_timer(s)
+        self.run_schedule(s)
     end
     def on_completed(zone)
         var stat = util.config.get_next_status(zone)
