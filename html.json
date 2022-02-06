@@ -32,5 +32,6 @@
         "<input type='checkbox' name='%s' %s></checkbox><label for='%s'>%s</label>",
         "</div><div><button name='o' class='button bgrn' type='submit'>Save</button></div></fieldset></form>"
     ],
-    "button": "<p><form id=hm action='hm' style='display: block;' method='get'><button>Configure Heating</button></form></p>"
+    "button": "<p><form id=hm action='hm' style='display: block;' method='get'><button>Configure Heating</button></form></p>",
+    "help": "<p style='text-align:center'>Use console command to re-enable UI:<br />HeatingOptions {\"UI\": 1}</p>"
 }

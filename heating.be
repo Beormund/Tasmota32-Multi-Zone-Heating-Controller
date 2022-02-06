@@ -192,7 +192,7 @@ class util
     # --------------------------------------------------------------------------------------------------
     static options = {
         'DISPLAY': 1, # 1 << 0
-        'CMD': 2, # 1 << 1
+        'UI': 2, # 1 << 1
         'LED': 4, # 1 << 2
         'SYNC': 8, # 1 << 3
         'MQTT': 16 # 1 << 4
@@ -222,8 +222,6 @@ class util
     static buttons = nil
     # The relays class handles relay power state changes
     static relays = nil
-    # This holds references to command classes such as 'zone/s' commands
-    static commands = {}
     # Calls a function passing in a time formatter
     static def set_time(callback)
         var t = api.now()['local']
@@ -245,13 +243,16 @@ class util
     static def remove_timer(id)
         api.remove_timer(id)
     end
-    # Used to load HTML for Configure Heating UI
-    static def load_file(fn)
-        var obj, f
-        f = open(api.wd .. fn, 'r')
-        obj = json.load(f.read())
-        f.close()
-        return obj
+    # find a key in map, case insensitive, return actual key or nil if not found
+    static def find_key_i(m, keyi)
+        var keyu = string.toupper(keyi)
+        if isinstance(m, map)
+            for k:m.keys()
+                if string.toupper(k)==keyu
+                    return k
+                end
+            end
+        end
     end
     # Restarts the scheduler (i.e., when schedules are updated)
     static def restart()
@@ -298,10 +299,15 @@ class status
     # Sends as sensor payload to Web manager
     def set_sensor()
         # "{s}ZN1 On until Fri 22:00{m}Auto Mode{e}"
+        var linkstart = '', linkend = ''
+        if util.config.is_option_set(util.options['UI'])
+            linkstart = '<a href="/hm">'
+            linkend = '</a>'
+        end
         var fmt = 12&(1<<self.mode)
-            ? '{s}<a href="/hm">%s %s</a>{m}Const Mode{e}'
-            : '{s}<a href="/hm">%s %s until %%a %%R</a>{m}%s Mode{e}'
-        var args = [fmt, self.label, self.state, self.key]
+            ? '{s}%s%s %s%s{m}Const Mode{e}'
+            : '{s}%s%s %s until %%a %%R%s{m}%s Mode{e}'
+        var args = [fmt, linkstart, self.label, self.state, linkend, self.key]
         var msg = self.format(args)
         api.settings.zones[self.zone].sensor = msg
     end
@@ -334,7 +340,8 @@ class status
     # Helper map for self.pub_mqtt()
     def tojson()
         var zjs = api.settings.zones[self.zone].tojson()
-        return {"Zone" .. self.zone+1:  zjs}
+        zjs['id'] = self.zone+1
+        return {"Zone":  zjs}
     end
 end
 
@@ -349,10 +356,38 @@ class zone: map
     def init(o)
         self.sensor = ''
         super(self).init()
-        o = isinstance(o, map) ? o : {"l": o ,"e": 0, "m": 0, "p": 0}
+        o = isinstance(o, map) ? o : {"l": o?o:'' ,"e": 0, "m": 0, "p": 0}
         for k: o.keys()
             self[k] = o[k]
         end
+    end
+    # validates json payload values if keys present:
+    # {"label": "Zone 1", "mode": 0} or {"label": "Zone 1", "mode": 1, "hours": 2}
+    # If validation successful returns a zone instance else raises an assert_failed error 
+    static def fromjson(m)
+        var zone = zone()
+        var msg = / s -> string.format("Error: %s invalid or missing", s)
+        for k: m.keys()
+            var key = string.tolower(k)
+            if key == 'label'
+                assert(type(m[k]) == 'string', msg(k))
+                zone[zone.label] = m[k]
+            elif key == 'mode'
+                assert(type(m[k]) == 'int', msg(k))
+                assert(m[k] >=0 && m[k] < size(util.modes), msg(k)) 
+                zone[zone.mode] = m[k]
+            elif key == 'hours'
+                assert(type(m[k]) == "int", msg(k))
+                assert(m[k] == 1 || m[k] == 2, msg(k))
+                # hours is not a member of zone so convert to expiry
+                zone[zone.expiry] = m[k] * 3600
+            end
+        end
+        if zone.contains(zone.mode) && zone[zone.mode] == 1
+            # If mode is boost then expiry should be > 0
+            assert(zone[zone.expiry] > 0, msg('hours'))
+        end
+        return zone
     end
     # Returns the zone's mode (current or previous)
     def get_mode(p)
@@ -365,12 +400,13 @@ class zone: map
     end
     def tojson()
         return {
-            "Label": self[self.label],
-            "Mode": util.modes[self.get_mode()],
-            "Power": self.get_power(self.get_mode()) ? "On" : "Off",
-            "Until": 12&(1<<self.get_mode()) 
+            "label": self[self.label],
+            "mode": util.modes[self.get_mode()],
+            "power": self.get_power(self.get_mode()) ? "On" : "Off",
+            "until": 12&(1<<self.get_mode()) 
                 ? nil 
-                : api.strftime("%FT%T", self[self.expiry])
+                : api.strftime("%FT%T", self[self.expiry]),
+            "expiry": self[self.expiry]
         }
     end
 end
@@ -448,13 +484,13 @@ class zones: list
         return status(z, m, p, e)
     end
     def tojson()
-        var m = {}
-        var k = 0
-        while k < size(self)
-            m['Zone' .. k+1] = self[k].tojson()
-            k += 1
+        var l = []
+        for k: self.keys()
+            var jsz = self[k].tojson()
+            jsz['id'] = k+1
+            l.push(jsz)
         end
-        return m
+        return l
     end
 end
 
@@ -478,32 +514,30 @@ class schedule: map
     # {"on": "07:00", "off": "12:59", "id":3, "days": [0,1,1,1,1,1,0], "zones":[1,1,0]}
     # If validation successful returns a schedule instance else raises an assert_failed error 
     static def fromjson(m)
-        var keys = ["on", "off", "id", "days", "zones"]
         var sched = schedule()
         var msg = / s -> string.format("Error: %s missing or invalid", s)
-        var k = 0
-        while k < size(keys)
-            assert(m.contains(keys[k]), msg(keys[k]))
-            if keys[k] == 'on' || keys[k] == 'off'
-                var t = api.strptime(m[keys[k]], '%H:%M')
-                assert(t && t['hour']<24 && t['min']<60, msg(keys[k]))
-                sched[keys[k] == 'on' ? schedule.on : schedule.off] = t['hour']*3600+t['min']*60
-            elif keys[k] == 'id'
-                assert(type(m[keys[k]]) == 'int', msg(keys[k]))
-                sched[schedule.id] = m[keys[k]]
-            elif keys[k] == 'days' || keys[k] == 'zones'
-                assert(classname(m[keys[k]]) == 'list', msg(keys[k]))
-                var l = keys[k] == 'days' ? 7 : api.settings.zones.size()
-                assert(size(m[keys[k]]) == l, msg(keys[k]))
+        for k:  ["on", "off", "id", "days", "zones"]
+            var key = util.find_key_i(m, k)
+            assert(key, msg(k))
+            if k == 'on' || k == 'off'
+                var t = api.strptime(m[key], '%H:%M')
+                assert(t && t['hour']<24 && t['min']<60, msg(k))
+                sched[k == 'on' ? schedule.on : schedule.off] = t['hour']*3600+t['min']*60
+            elif k == 'id'
+                assert(type(m[key]) == 'int', msg(k))
+                sched[schedule.id] = m[key]
+            elif k == 'days' || k == 'zones'
+                assert(classname(m[key]) == 'list', msg(k))
+                var l = k == 'days' ? 7 : api.settings.zones.size()
+                assert(size(m[key]) == l, msg(k))
                 var x = 0
-                for lk: m[keys[k]].keys()
-                    var v = m[keys[k]][lk]
-                    assert(v == 0 || v == 1, msg(keys[k]))
+                for lk: m[key].keys()
+                    var v = m[key][lk]
+                    assert(v == 0 || v == 1, msg(k))
                     if v x+= (1 << lk) end
                 end
-                sched[keys[k] == 'days' ? schedule.days : schedule.zones] = x
+                sched[k == 'days' ? schedule.days : schedule.zones] = x
             end
-            k += 1
         end
         assert(sched[schedule.off] > sched[schedule.on], msg("on/off times"))
         return sched
@@ -733,13 +767,11 @@ class schedules : list
         end
     end
     def tojson()
-        var m = {}
-        var k = 0
-        while k < size(self)
-            m["Schedule" .. k+1] = self[k].tojson()
-            k += 1
+        var l = []
+        for k: self
+            l.push(k.tojson())
         end
-        return m
+        return l
     end
 end
 
@@ -772,12 +804,42 @@ class config
             set ? self.enable_leds(configure) : self.disable_leds()
         elif opt == util.options['SYNC'] && set
             self.set_webbuttons()
+        elif opt == util.options['UI']
+            set ? self.enable_ui() : self.disable_ui()
         end
     end
     # Configures options - called by HeatingController on startup
     def configure_options()
         for opt: util.options
             self.configure_option(opt, self.is_option_set(opt))
+        end
+    end
+    # If UI option is set, enable the Tasmota UI
+    # Obviously if the UI is disabled from the UI it can
+    # only be re-enabled via the HeatingOptions command
+    def enable_ui()
+        import sys
+        var path = sys.path()
+        path.push(api.wd)
+        import heating_ui
+        heating_ui.wd = api.wd
+        heating_ui.start()
+        path.pop()
+        for z: api.settings.zones.keys()
+            var stat = api.settings.zones.get_status(z)
+            stat.set_sensor()
+        end
+    end
+    def disable_ui()
+        import sys
+        var path = sys.path()
+        path.push(api.wd)
+        import heating_ui
+        heating_ui.stop()
+        path.pop()
+        for z: api.settings.zones.keys()
+            var stat = api.settings.zones.get_status(z)
+            stat.set_sensor()
         end
     end
     # If DISPLAY option is set, enable the screen
@@ -882,7 +944,7 @@ class config
             ])
         end
         if !api.settings.has('options')
-            api.settings.options = 22 # CMD/LED/MQTT enabled
+            api.settings.options = 22 # UI/LED/MQTT enabled
         end
     end
 end
@@ -942,8 +1004,6 @@ class scheduler
         end
     end
     def run_schedule(s)
-        # Get the time now in seconds
-        var now = api.rtc()['local']
         # Is the schedule switching on or off?
         var power = s.is_running()
         # Get the next run time depending on power state
@@ -1127,315 +1187,7 @@ class override
     end
 end
 
-# Display Schedule Summary/Editor in 'Configure Heating'
-class schedule_ui
-    # Get list of day indices
-    # bits 30 -> [-MTWT--]
-    def bits2days(bits)
-        var l = []
-        var d = 0
-        while d < size(util.days)
-            bits & (1 << d) 
-            ? l.push(util.days[d][0]) 
-            : l.push("<mark>" .. util.days[d][0] .. "</mark>")
-            d += 1
-        end
-        return l.concat()
-    end
-    # Send a list of schedules as HTML fragment
-    def show_schedules(html)
-        webserver.content_send(html[0])
-        for s: api.settings.schedules
-            var day_str = self.bits2days(s[s.days])
-            var zone_str = ''
-            var z = 0
-            while z < size(api.settings.zones)
-                if !s.is_set(s.zones, z)
-                    z += 1
-                    continue 
-                end
-                zone_str += api.settings.zones.get_label(z)
-                if z < api.settings.zones.size()-1
-                    zone_str += ' '
-                end
-                z += 1
-            end
-            var t = size(zone_str) > 10
-            webserver.content_send(
-                string.format(
-                    html[1], s[s.id], s[s.id], s.secs2str(s[s.on]), 
-                    s.secs2str(s[s.off]), day_str, zone_str, 
-                    t ? zone_str[0 .. 11] + ".." : zone_str
-                )
-            )
-        end
-        var new_id = api.settings.schedules.next_id()
-        webserver.content_send(string.format(html[2], new_id ))
-    end
-    # Displays a web control for editing a single schedule
-    def show_editor(id, html)
-        var s = api.settings.schedules.get(id)
-        var action = s ? 'update' : 'new'
-        s = s ? s : schedule()
-        webserver.content_send(string.format(html[0], id, id, s.secs2str(s[s.on]), s.secs2str(s[s.off])))
-        var d = 0
-        while d < size(util.days)
-            var checked = s.is_set(s.days, d) ? 'checked' : ''
-            var dl = util.days[d]
-            webserver.content_send(string.format(html[1], dl, 1 << d, checked, dl, dl))
-            d += 1
-        end
-        webserver.content_send(html[2])
-        var z = 0
-        while z < size(api.settings.zones)
-            var checked = s.is_set(s.zones, z) ? 'checked' : '', zl = api.settings.zones.get_label(z)
-            webserver.content_send(string.format(html[3], zl, 1 << z, checked, zl, zl))
-            z += 1
-        end
-        webserver.content_send(string.format(html[4], action, id))
-        if action == 'update'
-            webserver.content_send(html[5])
-        end
-        webserver.content_send(html[6])
-    end
-end
-
-# Displays zone sumarry/editor widgets in 'Configure Heating'
-class zone_ui
-    # Shows a list of zones with status info
-    def show_zones(html)
-        webserver.content_send(html[0])
-        var z = 0
-        while z < size(api.settings.zones)
-            var info = api.settings.zones.get_status(z).get_info()
-            webserver.content_send(
-                string.format(html[1], z+1, z+1, info)
-            )
-            z += 1
-        end
-        var new_id = api.settings.zones.size()+1
-        webserver.content_send(string.format(html[2], new_id ))
-        webserver.content_send(html[3])
-    end
-    # Displays a web control for editing a single zone
-    def show_editor(zid, html)
-        var z = api.settings.zones.get(zid-1)
-        var action = z != nil ? 'update' : 'new'
-        z = z ? z : zone('ZN' .. zid)
-        webserver.content_send(string.format(html[0], zid-1, zid, z[zone.label]))
-        var k = 0
-        while k < size(util.modes)
-            var checked = z.get_mode() == k ? 'checked' : ''
-            var mode = util.modes[k]
-            webserver.content_send(string.format(html[1], mode, k, checked, mode, mode))
-            k += 1
-        end
-        webserver.content_send(html[2])
-        webserver.content_send(string.format(html[3], action))
-        if action == 'update'
-            webserver.content_send(html[4])
-        end
-        webserver.content_send(html[5])
-    end
-end
-
-# Displays options in 'Configure Heating'
-class options_ui
-    def show_options(html)
-        webserver.content_send(html[0])
-        for k: util.options.keys()
-            var checked = util.config.is_option_set(util.options[k]) ? 'checked' : ''
-            webserver.content_send(string.format(html[1], k, checked, k, k))
-        end
-        webserver.content_send(html[2])
-    end
-end
-
-class http_manager
-    # Hydrate a schedule object for a new/update action
-    def tosched(id)
-        var s = schedule()
-        s[s.id] = id
-        for arg: 0 .. webserver.arg_size()-2
-            var name = webserver.arg_name(arg)
-            var value = webserver.arg(arg)
-            if name == 'days[]'
-                s[s.days] += int(value)
-            elif name == 'zones[]'
-                s[s.zones] += int(value)
-            elif name == 'on'
-                s[s.on] = s.str2secs(value)
-            elif name == 'off'
-                s[s.off] = s.str2secs(value)
-            end
-        end
-        return s         
-    end
-    # Updates a zone based on web form entry
-    def update_zone(id)
-        def set_mode(id, mode)
-            if mode == 1
-                if webserver.has_arg('hours[]')
-                    var hours = int(webserver.arg('hours[]'))
-                    util.override.set(id, mode, hours * 3600)
-                end
-            else
-                util.override.set(id, mode)
-            end
-        end
-        if webserver.has_arg('delete')
-            # Check boost.If active cancel...
-            if api.settings.zones.get_mode(id) == 1
-                util.override.on_boost_cancel(id)
-            end
-            # Remove last button and relay triggers
-            util.buttons.pop_trigger()
-            util.relays.pop_trigger()
-            # Clear display zone info BEFORE delete
-            if util.scr
-                for z: api.settings.zones.keys()
-                    util.scr.clear_zone(z)
-                end
-            end
-            # Remove zone from zone collection
-            api.settings.zones.pop(id)
-            # Remove zone from schedules
-            api.settings.schedules.remove_zone(id)
-            # Re-sync power state for reshuffled zones
-            for z: api.settings.zones.keys()
-                var stat = api.settings.zones.get_status(z)
-                # Set the power state of the relay
-                api.set_power(z, stat.power)
-                # Notify display etc.
-                stat.notify()
-            end
-            # Sync the Tasmota UI Toggle buttons
-            if util.config.is_option_set(util.options['SYNC'])
-                util.config.set_webbuttons()
-            end
-            return
-        end
-        if webserver.has_arg('new')
-            # Process label
-            var label = webserver.has_arg('label') ? webserver.arg('label') : ''
-            label = size(label) ? label : 'ZN' .. id+1
-            # Add the new zone to the zones collection
-            api.settings.zones.push(zone(label))
-            # Add the new zone to schedules
-            api.settings.schedules.set_zone(id)
-            # Sync button and relay triggers
-            util.buttons.add_trigger(id)
-            util.relays.add_trigger(id)
-            # Sync the Tasmota UI Toggle buttons
-            if util.config.is_option_set(util.options['SYNC'])
-                util.config.set_webbutton(id+1, label)
-            end
-            # Process mode
-            if webserver.has_arg('modes[]')
-                var mode = int(webserver.arg('modes[]'))
-                set_mode(id, mode)
-            end
-        elif webserver.has_arg('update')
-            # Process label
-            var _dirty = false
-            if webserver.has_arg('label')
-                var label = webserver.arg('label')
-                # Only update the label if it has changed
-                if size(label) > 0 && label != api.settings.zones.get_label(id)
-                    api.settings.zones.set_label(id, label)
-                    _dirty = true
-                     # Sync the Tasmota UI Toggle buttons
-                    if util.config.is_option_set(util.options['SYNC'])
-                        util.config.set_webbutton(id+1, label)
-                    end
-                end
-            end
-            # Process mode
-            if webserver.has_arg('modes[]')
-                var mode = int(webserver.arg('modes[]'))
-                # Only update the mode if it has changed
-                if mode != api.settings.zones.get_mode(id)
-                    set_mode(id, mode)
-                    _dirty = false
-                end
-            end
-            # There are updates so update the display and pub to MQTT
-            if _dirty
-                var stat = api.settings.zones.get_status(id)
-                stat.set_screen()
-                stat.pub_mqtt()
-                stat.set_sensor()
-            end
-        end
-    end
-    # Deletes/Updates/Creates a schedule based on web form entry
-    def update_schedule(id)
-        if webserver.has_arg('delete')
-            return api.settings.schedules.pop(id)
-        elif webserver.has_arg('update')
-            return api.settings.schedules.update(self.tosched(id))
-        elif webserver.has_arg('new')
-            return api.settings.schedules.push(self.tosched(id))
-        end
-    end
-    # Updates options
-    def update_options()
-        for k: util.options.keys()
-            var current = util.config.is_option_set(util.options[k])
-            var new = webserver.has_arg(k)
-            if current != new
-                util.config.set_option(util.options[k], new)
-            end
-        end
-    end
-    #  Determines which widgets are displayed
-    def on_http_get()
-        if !webserver.check_privileged_access() return nil end
-        var html = util.load_file('html.json')
-        webserver.content_start('Configure Heating')
-        webserver.content_send_style()
-        if webserver.has_arg('id')
-            var gui = schedule_ui()
-            gui.show_schedules(html['sched-sum'])
-            gui.show_editor(int(webserver.arg('id')), html['sched'])
-        elif webserver.has_arg('zid')
-            var gui = zone_ui()
-            gui.show_zones(html['zone-sum'])
-            gui.show_editor(int(webserver.arg('zid')), html['zone'])
-        else
-            zone_ui().show_zones(html['zone-sum'])
-            schedule_ui().show_schedules(html['sched-sum'])
-            options_ui().show_options(html['options'])
-        end
-        webserver.content_button(webserver.BUTTON_CONFIGURATION)
-        webserver.content_stop()
-    end
-    # Handles data submitted by web widgets
-    def on_http_post()
-        if webserver.has_arg('z')
-            self.update_zone(int(webserver.arg('z')))
-        elif webserver.has_arg('s') 
-            if self.update_schedule(int(webserver.arg('s')))
-                util.restart()
-            end
-        elif webserver.has_arg('o')
-            self.update_options()
-        end
-        self.on_http_get()
-        # Force the updated configuration to be saved to flash
-        util.config.save()
-    end
-end
-
 class driver
-    var button
-    def init()
-        self.button = util.load_file('html.json')['button']
-    end
-    # Displays a "Configure Heating" button on the configuration page
-    def web_add_config_button()
-        webserver.content_send(self.button)
-    end
     # Called by Tasmota home page to display sensor info
     def web_sensor()
         var msg = ''
@@ -1449,21 +1201,8 @@ class driver
     # Called by Tasmota on teleperiod
     def json_append()
         var jsonstr = json.dump(api.settings.zones.tojson())
-        var msg = ",\"Heating\":" .. jsonstr
+        var msg = ",\"Zones\":" .. jsonstr
         api.response_append(msg)
-    end
-    # Add HTTP POST and GET handlers
-    def web_add_handler()
-        webserver.on('/hm', / -> self.http_get(), webserver.HTTP_GET)
-        webserver.on('/hm', / -> self.http_post(), webserver.HTTP_POST)
-    end
-    def http_get()
-        var web = http_manager()
-        web.on_http_get()
-    end
-    def http_post()
-        var web = http_manager()
-        web.on_http_post()
     end
 end
 
@@ -1511,10 +1250,10 @@ class relays: component
     def on_changed(v, t)
         var zone = int(string.split(t, '#')[0][5..])-1
         var mode = api.settings.zones.get_mode(zone)
-        self.cmd_set_power(zone, mode, v)
+        self.set_power(zone, mode, v)
     end
     # Change the power state of the zone if different from current state
-    def cmd_set_power(zone, mode, payload)
+    def set_power(zone, mode, payload)
         var from_power = api.settings.zones.get_power(zone, mode)
         var to_power = int(payload)
         # XOR returns true if power needs toggling
@@ -1538,6 +1277,7 @@ class relays: component
     end
 end
 
+# Base class for registering commands 
 class command
     def init()
         self.add_command()
@@ -1545,115 +1285,98 @@ class command
     def add_command()
         api.add_cmd(self.cmd, / c, i, p, j -> self.on_cmd(c, i, p, j))
     end
-    def cmds_enabled()
-        if !util.config.is_option_set(util.options['CMD']) 
-            api.resp_cmnd('{"Command": "Unknown"}')
-            return false
-        end
-        return true
-    end
     def resp_cmnd(idx, msg)
         var cmd = string.toupper(string.format('%s%d', self.cmd, idx))
         api.resp_cmnd(string.format('{"%s": "%s"}', cmd, msg ? msg : "DONE"))
     end
 end
 
+class modes_command: command
+    static cmd = "HeatingModes"
+    def init() super(self).init() end
+    def on_cmd(cmd, idx, payload, payload_json)
+        api.resp_cmnd(json.dump({self.cmd: util.modes}))
+    end
+end
+
+class days_command: command
+    static cmd = "HeatingDays"
+    def init() super(self).init() end
+    def on_cmd(cmd, idx, payload, payload_json)
+        api.resp_cmnd(json.dump({self.cmd: util.days}))
+    end
+end
+
+class labels_command: command
+    static cmd = "ZoneLabels"
+    def init() super(self).init() end
+    def on_cmd(cmd, idx, payload, payload_json)
+        var l = []
+        for z: 0 .. size(api.settings.zones)-1
+            l.push(api.settings.zones.get_label(z))
+        end
+        api.resp_cmnd(json.dump({self.cmd: l}))
+    end
+end
+
+# Publishes the status for all options as json payload.
+# Updates the status of 1 or more options
+# HeatingOptions -> {"HeatingOptions":{"CMD":1,"LED":1,"DISPLAY":1,"SYNC":1,"MQTT":1}}
 class options_command: command
     static cmd = "HeatingOptions"
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
-        if !self.cmds_enabled() return end
         if payload_json && isinstance(payload_json, map)
-            for k: payload_json.keys()
-                var option = util.options.find(string.toupper(k))
-                if option
-                    var new = util.cmd_params.find(string.tolower(str(payload_json[k])))
-                    var current = util.config.is_option_set(option)
-                    if new != nil && current != new
-                        util.config.set_option(option, new)
-                    end
-                else
-                    self.resp_cmnd(idx, "ERROR: Invalid option name")
-                    return
-                end
-            end
+            self.set_options(payload_json)
+            self.resp_cmnd()
         elif payload == ''
             var m = {}
             for k: util.options.keys()
                 m[k] = util.config.is_option_set(util.options[k]) ? 1 : 0
             end
-            api.publish_result(json.dump({self.cmd: m}))
+            api.resp_cmnd(json.dump({self.cmd: m}))
         end
-        self.resp_cmnd()
+    end
+    def set_options(payload)
+        var _save = false
+        for k: payload.keys()
+            var option = util.options.find(string.toupper(k))
+            if option
+                var new = util.cmd_params.find(string.tolower(str(payload[k])))
+                var current = util.config.is_option_set(option)
+                if new != nil && current != new
+                    util.config.set_option(option, new)
+                    _save = true
+                end
+            end
+        end
+        if _save util.config.save() end
     end
 end
 
+# Publishes the status of all zones as json payload
+# zones -> 
+# {"Zones": {
+#    "Zone3": {"Power":"Off","Label":"WTR","Mode":"Auto","Until":"2022-02-03T16:30:00"},
+#    "Zone1": {"Power":"Off","Label":"HTG1","Mode":"Auto","Until":"2022-02-03T16:30:00"},
+#    "Zone2": {"Power":"On","Label":"HTG2","Mode":"Day","Until":"2022-02-03T22:00:00"}
+# }}
 class zones_command: command
     static cmd = 'Zones'
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
-        if !self.cmds_enabled() return end
         var json = json.dump({self.cmd: api.settings.zones.tojson()})
-        api.publish_result(json)
-        self.resp_cmnd()
-    end
-end
-
-class schedules_command: command
-    static cmd = 'Schedules'
-    def init() super(self).init() end
-    def on_cmd(cmd, idx, payload, payload_json)
-        if !self.cmds_enabled() return end
-        var json = json.dump({self.cmd: api.settings.schedules.tojson()})
-        api.publish_result(json)
-        self.resp_cmnd()
-    end
-end
-
-class schedule_command: command
-    static cmd = 'Schedule'
-    def init() super(self).init() end
-    def on_cmd(cmd, idx, payload, payload_json)
-        if !self.cmds_enabled() return end
-        if idx >= 0 && idx <= api.settings.schedules.size()+1
-            var _dirty = false
-            if isinstance(payload_json, map)
-                payload_json.setitem('id', idx)
-                var sched
-                try sched = schedule.fromjson(payload_json)
-                except 'assert_failed' as e, m
-                    self.resp_cmnd(idx, m)
-                    return
-                end
-                if idx == 0
-                    _dirty = api.settings.schedules.push(sched)
-                else
-                    _dirty = api.settings.schedules.update(sched)
-                end
-            elif string.tolower(payload) == 'delete' && idx > 0
-                _dirty = api.settings.schedules.pop(idx)
-            elif payload == '' 
-                if idx == 0 || idx > api.settings.schedules.size()
-                    self.resp_cmnd(idx, "ERROR: Schedule not found")
-                    return
-                end
-                var json = json.dump({
-                    self.cmd .. idx: api.settings.schedules.get(idx).tojson()
-                })
-                api.publish_result(json)
-            end
-            if _dirty util.restart() end
-        end
-        self.resp_cmnd(idx)
+        api.resp_cmnd(json)
     end
 end
 
 # Handler for zone command
 # zone1 1 -> turn on heating zone 1
 # zone2 0 -> turn off heating zone 2
-# zone3 {"mode": 5} -> If not in Day mode, switch to Day mode
-# zone3 {"mode": 1, "hours": 2} -> Boost zone 3 for 2 hours
-# The zone will be switched into an appropriate mode
+# zone3 {update: {"mode": 5}} -> If not in Day mode, switch to Day mode
+# zone3 {update: {"mode": 1, "hours": 2}} -> Boost zone 3 for 2 hours
+# zone {new: {"mode": 4, "label": "HTWR"}} -> The new zone will be created
+# zone3 delete -> delete zone 3
 class zone_command: command
     static cmd = 'Zone'
     def init() super(self).init() end
@@ -1661,65 +1384,229 @@ class zone_command: command
         return api.settings.zones.get_mode(zone)
     end
     def on_cmd(cmd, idx, payload, payload_json)
-        if !self.cmds_enabled() return end
-        var zone = idx-1
-        if zone >= 0 && zone < api.settings.zones.size()
-            if isinstance(payload_json, map)
-                self.cmd_set_mode(zone, payload_json)
-            elif payload == ''
-                api.settings.zones.get_status(zone).pub_mqtt()             
-            else
-                var power = util.cmd_params.find(string.tolower(payload))
-                if power != nil 
-                    self.cmd_set_power(zone, power) 
-                end
-            end
-        else
-            self.resp_cmnd(idx, "Zone not found")
+        idx-=1
+        if idx < 0 || idx > api.settings.zones.size()-1
+            api.resp_cmnd(json.dump({self.cmd: nil}))
             return
         end
-        self.resp_cmnd(idx)
+        if isinstance(payload_json, map)
+            for k: ['new', 'update']
+                var key = util.find_key_i(payload_json, k)
+                if key && isinstance(payload_json[key], map)
+                    var z
+                    try z = zone.fromjson(payload_json[key])
+                    except 'assert_failed' as e, m
+                        self.resp_cmnd(idx+1, m)
+                        return
+                    end
+                    if k == 'new'
+                        self.new(z)
+                        self.resp_cmnd()
+                        return
+                    elif k == 'update'
+                        self.update(idx, z)
+                    end
+                    break
+                end
+            end
+        elif payload == string.tolower("delete")
+            self.delete(idx)
+        elif payload == ''
+            var zone = api.settings.zones[idx].tojson()
+            zone['id'] = idx+1
+            api.resp_cmnd(json.dump({self.cmd: zone}))
+            return
+        else
+            var power = util.cmd_params.find(string.tolower(payload))
+            if power != nil 
+                self.set_power(idx, power) 
+            end
+        end
+        self.resp_cmnd(idx+1)
+    end
+    def new(payload)
+        var idx = api.settings.zones.size()
+        # Process label
+        if !size(payload[zone.label])
+            payload[zone.label] = 'ZN' .. idx+1
+        end
+        # Add the new zone to the zones collection
+        api.settings.zones.push(zone(payload))
+        # Add the new zone to schedules
+        api.settings.schedules.set_zone(idx)
+        # Sync button and relay triggers
+        util.buttons.add_trigger(idx)
+        util.relays.add_trigger(idx)
+        # Sync the Tasmota UI Toggle buttons
+        if util.config.is_option_set(util.options['SYNC'])
+            util.config.set_webbutton(idx+1, payload[zone.label])
+        end
+        # Process mode and force update as this is a new zone
+        self.set_mode(idx, payload, true)
+        if payload[zone.mode]
+            # If mode is override set schedule power state
+            var power = api.settings.schedules.get_next_status(idx).power
+            api.settings.zones.set_power(idx, power)
+        end
+        util.config.save()
+    end
+    def update(idx, payload)
+        # Process label
+        var _dirty = false
+        var label = payload.find(zone.label)
+        if label
+            # Only update the label if it has changed
+            if size(label) > 0 && label != api.settings.zones.get_label(idx)
+                api.settings.zones.set_label(idx, label)
+                _dirty = true
+                    # Sync the Tasmota UI Toggle buttons
+                if util.config.is_option_set(util.options['SYNC'])
+                    util.config.set_webbutton(idx+1, label)
+                end
+            end
+        end
+        # Process mode
+        var mode = payload.find(zone.mode)
+        # Only update the mode if it has changed
+        if mode != nil && mode != api.settings.zones.get_mode(idx)
+            self.set_mode(idx, payload)
+            _dirty = false
+        end
+        # There are updates so update the display and pub to MQTT
+        if _dirty
+            var stat = api.settings.zones.get_status(idx)
+            stat.set_screen()
+            stat.pub_mqtt()
+            stat.set_sensor()
+            util.config.save()
+        end
+    end
+    def delete(idx)
+        # Check boost.If active cancel...
+        if api.settings.zones.get_mode(idx) == 1
+            util.override.on_boost_cancel(idx)
+        end
+        # Remove last button and relay triggers
+        util.buttons.pop_trigger()
+        util.relays.pop_trigger()
+        # Clear display zone info BEFORE delete
+        if util.scr
+            for z: api.settings.zones.keys()
+                util.scr.clear_zone(z)
+            end
+        end
+        # Remove zone from zone collection
+        api.settings.zones.pop(idx)
+        # Remove zone from schedules
+        api.settings.schedules.remove_zone(idx)
+        # Re-sync power state for reshuffled zones
+        for z: api.settings.zones.keys()
+            var stat = api.settings.zones.get_status(z)
+            # Set the power state of the relay
+            api.set_power(z, stat.power)
+            # Notify display etc.
+            stat.notify()
+        end
+        # Sync the Tasmota UI Toggle buttons
+        if util.config.is_option_set(util.options['SYNC'])
+            util.config.set_webbuttons()
+        end
+        util.config.save()
     end
     # Change the operating mode for the zone if different from current mode
-    def cmd_set_mode(zone, payload)
-        if !payload.has('mode') return end
-        if type(payload['mode']) != 'int' return end
-        var to_mode = payload['mode']
-        if to_mode < 0 || to_mode > 5 return end
-        if to_mode == self.get_mode(zone) return end
+    def set_mode(idx, payload, force)
+        var to_mode = payload[zone.mode]
+        if !force && to_mode == self.get_mode(idx) return end
         if to_mode == 1
-            if !payload.has('hours') return end
-            if type(payload['hours']) != 'int' return end
-            var hours = payload['hours']
-            if hours  == 1 || hours == 2
-                util.override.set(zone, to_mode, hours * 3600)
-            end                                   
+            util.override.set(idx, to_mode, payload[zone.expiry])
         else
-            util.override.set(zone, to_mode)
+            util.override.set(idx, to_mode)
         end
     end
     # Change the power state of the zone if different from current state
-    def cmd_set_power(zone, to_power)
-        var mode = self.get_mode(zone)
-        var from_power = api.settings.zones.get_power(zone, mode)
+    def set_power(idx, to_power)
+        var mode = self.get_mode(idx)
+        var from_power = api.settings.zones.get_power(idx, mode)
         # XOR returns true if power needs toggling
         if from_power ? !to_power : to_power
             # Toggle Advance/Auto
             if mode == 0 || mode == 4
-                util.override.toggle_mode(zone, {0:4,4:0})
+                util.override.toggle_mode(idx, {0:4,4:0})
             # Toggle Const On/Off
             elif mode == 2 || mode == 3
-                util.override.toggle_mode(zone, {2:3,3:2})
+                util.override.toggle_mode(idx, {2:3,3:2})
             # Toggle Boost or Day 
             elif mode == 1 || mode == 5
                 # Switch to Advance mode if Auto doesn't toggle power
-                if api.settings.zones.get_power(zone) ? !to_power : to_power
-                    util.override.set(zone, 4)
+                if api.settings.zones.get_power(idx) ? !to_power : to_power
+                    util.override.set(idx, 4)
                 else
-                    util.override.set(zone, 0)
+                    util.override.set(idx, 0)
                 end
             end
         end
+    end
+end
+
+class schedules_command: command
+    static cmd = 'Schedules'
+    def init() super(self).init() end
+    def on_cmd(cmd, idx, payload, payload_json)
+        var json = json.dump({self.cmd: api.settings.schedules.tojson()})
+        api.resp_cmnd(json)
+    end
+end
+
+# Handler for schedule command
+# schedule1  -> return schedule1
+# schedule3 {update: {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}}
+# zone {new: {"mode": 4, "label": "HTWR"}} -> The new zone will be created
+# zone3 delete -> delete zone 3
+class schedule_command: command
+    static cmd = 'Schedule'
+    def init() super(self).init() end
+    def on_cmd(cmd, idx, payload, payload_json)
+        if idx < 1 || idx > api.settings.schedules.size()
+            api.resp_cmnd(json.dump({self.cmd: nil}))
+            return
+        end
+        if isinstance(payload_json, map)
+            for k: ['new', 'update']
+                var key = util.find_key_i(payload_json, k)
+                if key && isinstance(payload_json[key], map)
+                    payload_json[key].setitem('id', idx)
+                    try payload_json = schedule.fromjson(payload_json[key])
+                    except 'assert_failed' as e, m
+                        self.resp_cmnd(idx, m)
+                        return
+                    end
+                    if k == 'new'
+                        self.new(payload_json)
+                        self.resp_cmnd()
+                        return
+                    elif k == 'update'
+                        self.update(payload_json)
+                    end
+                    break
+                end
+            end
+        elif payload == string.tolower("delete") && idx > 0
+            self.delete(idx)
+        elif payload == ''
+            var json = json.dump({self.cmd: api.settings.schedules.get(idx).tojson()})
+            api.publish_result(json)
+            return
+        end
+        self.resp_cmnd(idx)
+    end
+    def new(payload)
+        if api.settings.schedules.push(payload) util.restart() end
+    end
+    def update(payload)
+        if api.settings.schedules.update(payload) util.restart() end
+    end
+    def delete(idx)
+        if api.settings.schedules.pop(idx) util.restart() end
     end
 end
 
@@ -1735,11 +1622,14 @@ class HeatingController
         # Load persisted zones, schedules and options
         util.config.load()
         # Register commands
-        util.commands['zone'] = zone_command()
-        util.commands['zones'] = zones_command()
-        util.commands['schedule'] = schedule_command()
-        util.commands['schedules'] = schedules_command()
-        util.commands['options'] = options_command()
+        zone_command()
+        zones_command()
+        schedule_command()
+        schedules_command()
+        options_command()
+        modes_command()
+        days_command()
+        labels_command()
         # Restoe configuration options
         util.config.configure_options()
         # Create the override capability
