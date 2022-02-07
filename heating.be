@@ -307,21 +307,18 @@ class status
         var fmt = 12&(1<<self.mode)
             ? '{s}%s%s %s%s{m}Const Mode{e}'
             : '{s}%s%s %s until %%a %%R%s{m}%s Mode{e}'
-        var args = [fmt, linkstart, self.label, self.state, linkend, self.key]
-        var msg = self.format(args)
+        var msg =  api.strftime(
+            string.format(
+                fmt, 
+                linkstart, 
+                self.label, 
+                self.state, 
+                linkend, 
+                self.key
+            ), 
+            self.expiry
+        )
         api.settings.zones[self.zone].sensor = msg
-    end
-    # Log info with the BRY: prefix
-    def log_info()
-        api.log('BRY: ' .. self.get_info())
-    end
-    # E.g., 'HTG1 Auto off until 16:30 Mon 18 Oct 21'
-    def get_info()
-        var fmt = 12&(1<<self.mode)
-            ? '%s Const %s' 
-            : '%s %s %s until %%H:%%M %%a %%d %%b %%y'
-        var args = [fmt, self.label, self.key, self.state]
-        return self.format(args)
     end
     def format(args)
         return api.strftime(
@@ -331,7 +328,6 @@ class status
     end
     # Update logs, LED, MQTT and screen
     def notify()
-        self.log_info()
         self.set_sensor()
         self.set_led()
         self.pub_mqtt()
@@ -398,15 +394,23 @@ class zone: map
     def get_power(m)
         return !!((self[self.power] >> int(!m)) & 1)
     end
+    def get_info()
+        var fmt = 12&(1<<self.get_mode())
+            ? '%s Const %s' 
+            : '%s %s %s until %%H:%%M %%a %%d %%b %%y'
+        return api.strftime(string.format(fmt, 
+            self[self.label], 
+            util.modes[self.get_mode()], 
+            self[self.power] ? 'On' : 'Off'), self[self.expiry])
+    end
     def tojson()
+        var m = self.get_mode()
         return {
             "label": self[self.label],
-            "mode": util.modes[self.get_mode()],
-            "power": self.get_power(self.get_mode()) ? "On" : "Off",
-            "until": 12&(1<<self.get_mode()) 
-                ? nil 
-                : api.strftime("%FT%T", self[self.expiry]),
-            "expiry": self[self.expiry]
+            "mode": util.modes[m],
+            "power": self.get_power(m) ? "On" : "Off",
+            "until": 12&(1<<m) ? nil : api.strftime("%FT%T", self[self.expiry]),
+            "info": self.get_info()
         }
     end
 end

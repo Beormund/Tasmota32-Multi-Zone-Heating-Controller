@@ -67,18 +67,9 @@ class zone_ui
     def show_zones(html, zones)
         webserver.content_send(html[0])
         for z: 0 .. size(zones)-1
-            var zone = zones[z]
-            var info = string.format("%s %s %s%s%s", 
-                zone['label'], 
-                zone['until'] ? zone['mode'] : '', 
-                zone['power'], 
-                zone['until'] ? ' until ' : '',
-                zone['until'] ? tasmota.strftime("%H:%M %a %d %b %y", zone['expiry']) : ''
-            )
-            webserver.content_send(string.format(html[1], z+1, z+1, info))
+            webserver.content_send(string.format(html[1], z+1, z+1, zones[z]['info']))
         end
-        var new_id = zones.size()+1
-        webserver.content_send(string.format(html[2], new_id ))
+        webserver.content_send(string.format(html[2], zones.size()+1))
         webserver.content_send(html[3])
     end
     # Displays a web control for editing a single zone

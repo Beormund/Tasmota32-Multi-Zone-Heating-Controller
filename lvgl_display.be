@@ -45,7 +45,7 @@ class touchscreen
         if code == lv.EVENT_VALUE_CHANGED
             var zone = int(event.user_data)
             var power = obj.has_state(lv.STATE_CHECKED)
-            self.util.commands['zone'].set_power(zone, power)
+            tasmota.cmd(string.format("zone%s %s", zone+1, power))
         end
     end
     def dropdown_changed_cb(obj, event)
@@ -53,8 +53,9 @@ class touchscreen
         if code == lv.EVENT_VALUE_CHANGED
             var zone = int(event.user_data)
             var option = obj.get_selected()
-            var payload = {"m": option, "e": 3600}
-            self.util.commands['zone'].set_mode(zone, payload)
+            var payload = {"update": {"mode": option}}
+            if option == 1 payload["update"]['hours'] = 1 end
+            tasmota.cmd(string.format("zone%s %s", zone+1, json.dump(payload)))
         end
     end
     def wifi_connected(bool)
