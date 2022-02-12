@@ -87,8 +87,9 @@ class api
     static def response_append(msg)
         tasmota.response_append(msg)
     end
-    static def publish_result(payload)
-        tasmota.publish_result(payload, '')
+    static def publish_result(payload, subtopic)
+        var _subtopic = subtopic ? subtopic : "RESULT"
+        tasmota.publish_result(payload, _subtopic)
     end
     static def get_relay_count()
         def pin(t, enum)
@@ -97,54 +98,6 @@ class api
         end
         return pin(0, gpio.REL1) + pin(0, gpio.REL1_INV)
     end
-end
-
-# Enables consumers to subscribe to wifi status changes
-class wifi
-   # Is wifi connected? Used by displays
-   static connected
-   # Used to hold wifi notification callbacks
-   static callbacks
-   # Next set of functions help notify consumers of wifi status changes
-   static def set_status(bool)
-       wifi.connected = bool
-       wifi.notify()
-   end
-   # Notify all callbacks of change of wifi status
-   static def notify()
-       if !wifi.callbacks return end
-       var i = 0
-       while i < size(wifi.callbacks)
-           wifi.callbacks[i].cb(wifi.connected)
-           i += 1
-       end
-   end
-   # Add wifi callbacks
-   static def add_cb(cb, id)
-       class wc
-           var cb, id
-           def init(cb, id)
-               self.cb = cb
-               self.id = id
-           end
-       end
-       if !wifi.callbacks
-           wifi.callbacks = []
-       end
-       wifi.callbacks.push(wc(cb, id))
-   end
-   # Remove wifi callbacks
-   static def remove_cb(id)
-       if !wifi.callbacks return end
-       var i = 0
-       while i < size(wifi.callbacks)
-           if wifi.callbacks[i].id == id
-               wifi.callbacks.remove(i) 
-           else
-               i += 1
-           end
-       end
-   end
 end
 
 class util
@@ -206,8 +159,6 @@ class util
         'true': true, 
         'false': false
     }
-    # See screen modules for further details. HeatingController initialises the screen
-    static scr = nil
     # Enabled access to WS2812 LEDs
     static WS2812 = nil
     # Enable easy access to config. HeatingController initialises the config
@@ -263,6 +214,19 @@ class util
     end
 end
 
+class disp
+    static def publish(payload)
+        api.publish_result(json.dump({'HeatingDisplay': payload}))
+    end
+end
+
+class ui
+    static initialised = false
+    static def publish(payload)
+        api.publish_result(json.dump({'HeatingUI': payload}))
+    end
+end
+
 # A status contains information about the current state of a zone
 class status
     var zone, mode, power, expiry, label, key, state
@@ -280,9 +244,9 @@ class status
         self.expiry = expiry
     end
     # Display max 20 chars: e.g., 'HTG1 off until 16:30'
-    def set_screen()
-        if !util.scr return end
-        util.scr.update_zone(self)
+    def update_display()
+        if !util.config.is_option_set(util.options['DISPLAY']) return end
+        disp.publish(self.tojson())
     end
     # WS2812 LED (1 pixel per zone) indicator
     def set_led()
@@ -300,7 +264,7 @@ class status
     def set_sensor()
         # "{s}ZN1 On until Fri 22:00{m}Auto Mode{e}"
         var linkstart = '', linkend = ''
-        if util.config.is_option_set(util.options['UI'])
+        if ui.initialised && util.config.is_option_set(util.options['UI'])
             linkstart = '<a href="/hm">'
             linkend = '</a>'
         end
@@ -331,13 +295,13 @@ class status
         self.set_sensor()
         self.set_led()
         self.pub_mqtt()
-        self.set_screen()
+        self.update_display()
     end
     # Helper map for self.pub_mqtt()
     def tojson()
         var zjs = api.settings.zones[self.zone].tojson()
         zjs['id'] = self.zone+1
-        return {"Zone":  zjs}
+        return {"HeatingZone":  zjs}
     end
 end
 
@@ -407,9 +371,9 @@ class zone: map
         var m = self.get_mode()
         return {
             "label": self[self.label],
-            "mode": util.modes[m],
-            "power": self.get_power(m) ? "On" : "Off",
-            "until": 12&(1<<m) ? nil : api.strftime("%FT%T", self[self.expiry]),
+            "mode": m,
+            "power": self.get_power(m),
+            "expiry": 12&(1<<m) ? 0 : self[self.expiry],
             "info": self.get_info()
         }
     end
@@ -809,77 +773,44 @@ class config
         elif opt == util.options['SYNC'] && set
             self.set_webbuttons()
         elif opt == util.options['UI']
-            set ? self.enable_ui() : self.disable_ui()
+            self.toggle_ui(set)
         end
     end
     # Configures options - called by HeatingController on startup
     def configure_options()
-        for opt: util.options
+        for opt: {'LED': 4,'SYNC': 8}
+            # Configure all other options on startup.
             self.configure_option(opt, self.is_option_set(opt))
         end
     end
     # If UI option is set, enable the Tasmota UI
     # Obviously if the UI is disabled from the UI it can
     # only be re-enabled via the HeatingOptions command
-    def enable_ui()
-        import sys
-        var path = sys.path()
-        path.push(api.wd)
-        import heating_ui
-        heating_ui.wd = api.wd
-        heating_ui.start()
-        path.pop()
+    def toggle_ui(enable)
+        ui.publish(enable ? "ON" : "OFF")
         for z: api.settings.zones.keys()
             var stat = api.settings.zones.get_status(z)
             stat.set_sensor()
         end
     end
-    def disable_ui()
-        import sys
-        var path = sys.path()
-        path.push(api.wd)
-        import heating_ui
-        heating_ui.stop()
-        path.pop()
-        for z: api.settings.zones.keys()
-            var stat = api.settings.zones.get_status(z)
-            stat.set_sensor()
-        end
-    end
-    # If DISPLAY option is set, enable the screen
+    # If DISPLAY option is set, enable the screen 
+    # (if display tapp loads before controller)
     def enable_display(configure)
-        if !util.scr
-            import introspect, global, sys
-            var path = sys.path()
-            path.push(api.wd)
-            var hc_display
-            if introspect.get(global, 'lv')
-                import lvgl_display as _d
-                hc_display = _d
-            else
-                import lcd_display as _d
-                hc_display = _d
+        disp.publish("ON")
+        if !configure return end
+        # Give the display a chance to initialise as on is async
+        api.set_timer(2000, 
+            def()
+                for z: 0 .. size(api.settings.zones)-1
+                    var stat = api.settings.zones.get_status(z)
+                    stat.update_display()
+                end
             end
-            path.pop()
-            util.scr = hc_display.screen(util, wifi)
-            if !configure return end
-            util.scr.start_clock()
-            # Update zone info
-            var z = 0
-            while z < size(api.settings.zones)
-                var stat = api.settings.zones.get_status(z)
-                stat.set_screen()
-                z += 1
-            end
-        end
-    end    
+        )
+    end
     # If DISPlAY option is unset, disable the screen
     def disable_display()
-        if util.scr
-            util.scr.stop_clock()
-            util.scr.clear()
-            util.scr = nil
-        end
+        disp.publish("OFF")
     end
     # Do not call before load() as pixel count needs zone size
     def enable_leds(configure)        
@@ -887,10 +818,8 @@ class config
             var pixels = api.settings.zones.size()
             util.WS2812 = Leds(pixels, api.WS2812)
             if !configure return end
-            var z = 0
-            while z < size(api.settings.zones)
+            for z: 0 .. size(api.settings.zones)-1
                 api.settings.zones.get_status(z).set_led()
-                z += 1
             end
         else
             # WS2812 not configured so disable LED option
@@ -920,7 +849,7 @@ class config
     def save()
         api.settings.save()
     end
-    # Loads zones and schedules from _persist.json
+    # Loads zones, schedules and options from _persist.json
     # If _persist.json does not contain the data default
     # options, zones, and schedules are created.
     def load()
@@ -1205,7 +1134,7 @@ class driver
     # Called by Tasmota on teleperiod
     def json_append()
         var jsonstr = json.dump(api.settings.zones.tojson())
-        var msg = ",\"Zones\":" .. jsonstr
+        var msg = ",\"HeatingZones\":" .. jsonstr
         api.response_append(msg)
     end
 end
@@ -1215,8 +1144,10 @@ class component
         self.add_triggers()
     end
     def add_trigger(zone)
+        # Run deferred as nested rules are blocked...
         api.add_rule(
-            string.format(self.fmt(), zone+1), / v, t -> self.on_changed(v, t)
+            string.format(self.fmt(), zone+1), 
+            / v, t -> api.set_timer(0, / -> self.on_changed(v, t))
         )
     end
     def add_triggers()
@@ -1312,7 +1243,7 @@ class days_command: command
 end
 
 class labels_command: command
-    static cmd = "ZoneLabels"
+    static cmd = "HeatingLabels"
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
         var l = []
@@ -1366,7 +1297,7 @@ end
 #    "Zone2": {"Power":"On","Label":"HTG2","Mode":"Day","Until":"2022-02-03T22:00:00"}
 # }}
 class zones_command: command
-    static cmd = 'Zones'
+    static cmd = 'HeatingZones'
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
         var json = json.dump({self.cmd: api.settings.zones.tojson()})
@@ -1382,7 +1313,7 @@ end
 # zone {new: {"mode": 4, "label": "HTWR"}} -> The new zone will be created
 # zone3 delete -> delete zone 3
 class zone_command: command
-    static cmd = 'Zone'
+    static cmd = 'HeatingZone'
     def init() super(self).init() end
     def get_mode(zone)
         return api.settings.zones.get_mode(zone)
@@ -1479,7 +1410,7 @@ class zone_command: command
         # There are updates so update the display and pub to MQTT
         if _dirty
             var stat = api.settings.zones.get_status(idx)
-            stat.set_screen()
+            stat.update_display()
             stat.pub_mqtt()
             stat.set_sensor()
             util.config.save()
@@ -1494,9 +1425,9 @@ class zone_command: command
         util.buttons.pop_trigger()
         util.relays.pop_trigger()
         # Clear display zone info BEFORE delete
-        if util.scr
-            for z: api.settings.zones.keys()
-                util.scr.clear_zone(z)
+        if util.config.is_option_set(util.options['DISPLAY'])
+            for z: 1 .. size(api.settings.zones)
+                disp.publish({"ClearZone": z})
             end
         end
         # Remove zone from zone collection
@@ -1553,7 +1484,7 @@ class zone_command: command
 end
 
 class schedules_command: command
-    static cmd = 'Schedules'
+    static cmd = 'HeatingSchedules'
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
         var json = json.dump({self.cmd: api.settings.schedules.tojson()})
@@ -1567,7 +1498,7 @@ end
 # zone {new: {"mode": 4, "label": "HTWR"}} -> The new zone will be created
 # zone3 delete -> delete zone 3
 class schedule_command: command
-    static cmd = 'Schedule'
+    static cmd = 'HeatingSchedule'
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
         if idx < 1 || idx > api.settings.schedules.size()
@@ -1634,7 +1565,7 @@ class HeatingController
         modes_command()
         days_command()
         labels_command()
-        # Restoe configuration options
+        # Restore configuration options
         util.config.configure_options()
         # Create the override capability
         util.override = override()
@@ -1644,14 +1575,23 @@ class HeatingController
         util.driver = driver()
         # Register the tasmota driver
         api.add_driver(util.driver)
-        # Fires when wifi connects
-        api.add_rule("Wifi#Connected", /-> wifi.set_status(true))
-        # Fires when wifi disconnects
-        api.add_rule("Wifi#Disconnected", /-> wifi.set_status(false))
-        # Fires when RTC has initialized 
-        api.add_rule('Time#Initialized', /  -> self.time_initialized())
+        # Fires when RTC has initialized (deferred)
+        api.add_rule('Time#Initialized', /-> 
+            api.set_timer(0, /-> self.time_initialized())
+        )
         # Fires when MQTT has connected
-        api.add_rule('Mqtt#Connected', /  -> self.mqtt_connected())
+        api.add_rule('Mqtt#Connected', /-> self.mqtt_connected())
+        # If ACK received from display, flag as initialised
+        api.add_rule("HeatingDisplay==ACK", /-> 
+            api.set_timer(0, /-> self.display_initialised())
+        )       
+        # If ACK received from UI, flag as initialised
+        api.add_rule("HeatingUI==ACK", /-> 
+            api.set_timer(0, /-> self.ui_initialised())
+        )
+        # Request ACK frm UI & DISPLAY modules
+        ui.publish("SYN")
+        disp.publish("SYN")
         # Register button press triggers
         util.buttons = buttons()
         # Register power state change triggers
@@ -1663,21 +1603,28 @@ class HeatingController
         util.override.refresh()
         # Start the scheduler
         util.scheduler.start()
-        # If a display is configured, show the time
-        if util.scr
-            util.scr.start_clock()
-        end
     end
     # When MQTT connects send heating status for all zones
     def mqtt_connected()
         if util.config.is_option_set(util.options['MQTT'])
-            var z = 0
-            while z < size(api.settings.zones)
+            for z: 0 .. size(api.settings.zones)-1
                 api.settings.zones.get_status(z).pub_mqtt()
-                z += 1
             end
         end
-    end    
+    end
+    def display_initialised()
+        tasmota.set_timer(0, /->tasmota.remove_rule("HeatingDisplay==ACK"))
+        tasmota.set_timer(0, /->tasmota.remove_rule("HeatingDisplay==SYN"))
+        var opt = util.options['DISPLAY']
+        util.config.configure_option(opt, util.config.is_option_set(opt))
+    end
+    def ui_initialised()
+        ui.initialised = true
+        tasmota.set_timer(0, /->tasmota.remove_rule("HeatingUI==ACK"))
+        tasmota.set_timer(0, /->tasmota.remove_rule("HeatingUI==SYN"))
+        var opt = util.options['UI']
+        util.config.configure_option(opt, util.config.is_option_set(opt))
+    end
 end
 
 heating.controller = HeatingController

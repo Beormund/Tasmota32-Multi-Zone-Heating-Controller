@@ -1,5 +1,5 @@
 #  ------------------------------------------------------------------------------------------------------
-#  display.be - Berry scripting language
+#  lcd_display.be - Berry scripting language
 #  Copyright (C) 2021 Shaun Brown, Berry language by Guan Wenliang https://github.com/Skiars/berry
 #
 #  This program is free software: you can redistribute it and/or modify
@@ -16,6 +16,7 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #  ------------------------------------------------------------------------------------------------------
 
+import string
 
 var lcd_display = module('lcd_display')
 
@@ -288,44 +289,124 @@ class lcd_i2c
     end
 end
 
+class clock
+    static callback = nil
+    static initialised = false
+    static waiting = false
+    static def initialise()
+        clock.initialised = true
+        if clock.waiting
+            clock.waiting = false
+            clock.callback()
+            clock.set_timer()
+        end
+    end
+    static def start(callback)
+        clock.callback = callback
+        if clock.initialised
+            clock.set_timer()
+        else
+            clock.waiting = true
+        end
+    end
+    static def set_timer()
+        tasmota.set_timer(
+            def()
+                var l = tasmota.rtc()['local']
+                var t = tasmota.time_dump(l)
+                return 60000-t['sec']*1000
+            end(),
+            def() 
+                if clock.callback
+                    clock.callback()
+                end
+                clock.set_timer() 
+            end, 
+            "hc_lvgl_timer"
+        )
+    end
+    static def stop()
+        tasmota.remove_timer("hc_lvgl_timer")
+    end
+ end
+
 class screen
-    var util, lcd
-    def init(util)
-        self.util = util
+    var lcd
+    def init()
         self.lcd = lcd_i2c()
+    end
+    def start()
         self.power(true)
-        self.lcd.write_line("Starting...", 1)
+        # subscribe to initial time
+        if clock.initialised 
+            self.update_clock()
+        else
+            self.lcd.write_line("Starting...", 1)
+            clock.callback = / -> self.update_clock()
+        end
+        self.start_clock()
+        tasmota.add_rule("HeatingDisplay#HeatingZone", /z-> self.update_zone(z))
+        tasmota.add_rule("HeatingDisplay#ClearZone", /z-> self.clear_zone(z))
+    end
+    def stop()
+        self.lcd.clear()
+        tasmota.remove_rule("HeatingDisplay#HeatingZone")
+        tasmota.remove_rule("HeatingDisplay#ClearZone")
+        self.stop_clock()
+        self.power(false)
     end
     def power(bool)
         self.lcd.set_backlight(bool)
     end
-    def update_clock(formatter)
-        self.lcd.write_line(formatter('%H:%M %a %d %b %y'), 1)
+    def update_clock()
+        self.lcd.write_line(tasmota.strftime('%H:%M %a %d %b %y', tasmota.rtc()['local']), 1)
     end
-    def update_zone(status)
-        if status.zone > 2 return end
-        var fmt = 12&(1<<status.mode) ? "%s %s Const" : '%s %s until %%R'
-        var args = [fmt, status.label, status.state]
-        self.lcd.write_line(status.format(args), status.zone+2)
+    def update_zone(zone)
+        if zone['id'] > 3 return end
+        var const = 12&(1<<zone['mode'])
+        var fmt = const ? "%s %s Const" : '%s %s until %%R'
+        var info = string.format(fmt, zone['label'], zone['power'] ? 'ON' : 'OFF')
+        if !const
+            info = tasmota.strftime(info, zone['expiry'])
+        end
+        self.lcd.write_line(info, zone['id']+1)
     end
     def clear_zone(zone)
-        self.lcd.write_line('', zone+2)
-    end
-    def clear()
-        self.lcd.clear()
-        self.power(false)
+        self.lcd.write_line('', zone+1)
     end
     def start_clock()
-        self.lcd.write_line('', 1)
-        var callback = / formatter -> self.update_clock(formatter)
-        var millis = / now -> 60000-now['sec']*1000
-        self.util.set_time(callback)
-        self.util.set_timer(millis, callback, 'lcd_ticker', true)
+        clock.start(/->self.update_clock())
     end
     def stop_clock()
-        self.util.remove_timer('lcd_ticker')
+        clock.stop()
     end
 end
 
-lcd_display.screen = screen
+# Hold a reference to screen instance
+var _display = nil 
+
+def ack()
+    tasmota.publish_result('{"HeatingDisplay":"ACK"}', 'RESULT')
+end
+
+def start()
+    if _display return end
+    _display = screen()
+    _display.start()
+end
+def stop()
+    if !_display return end
+    _display.stop()
+    _display = nil
+end
+
+# Subscibe to Tasmota events
+tasmota.add_rule("Time#Initialized", /-> clock.initialise())
+# Subscribe to events sent from Heating Controller
+tasmota.add_rule("HeatingDisplay==ON", /->tasmota.set_timer(0, /->start()))
+tasmota.add_rule("HeatingDisplay==OFF", /->tasmota.set_timer(0, /->stop()))
+tasmota.add_rule("HeatingDisplay==SYN", /->tasmota.set_timer(0, /->ack()))
+# Once lvgl_display loads an initialisation trigger is broadcast
+ack()
+
 return lcd_display

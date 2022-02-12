@@ -19,7 +19,6 @@
 # All imports required for the heating app
 import string
 import json
-import webserver
 import persist
 import heating
 

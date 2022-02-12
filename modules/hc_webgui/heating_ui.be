@@ -1,3 +1,4 @@
+import webserver
 import string
 import json
 
@@ -80,7 +81,7 @@ class zone_ui
         webserver.content_send(string.format(html[0], zid, zid, z['label']))
         for k: 0 .. size(modes)-1
             var mode = modes[k]
-            var checked = z['mode'] == mode ? 'checked' : ''
+            var checked = z['mode'] == k ? 'checked' : ''
             webserver.content_send(string.format(html[1], mode, k, checked, mode, mode))
         end
         webserver.content_send(html[2])
@@ -109,7 +110,7 @@ class http_manager
     # Updates a zone based on web form entry
     def update_zone(id)
         if webserver.has_arg('delete')
-            tasmota.cmd(string.format("Zone%d delete", id))
+            tasmota.cmd(string.format("HeatingZone%d delete", id))
             return
         end
         if webserver.has_arg('new') || webserver.has_arg('update')
@@ -127,9 +128,9 @@ class http_manager
                 zone['hours'] = int(webserver.arg('hours[]'))
             end
             if webserver.has_arg('new') 
-                tasmota.cmd(string.format("Zone %s", json.dump({"new": zone})))
+                tasmota.cmd(string.format("HeatingZone %s", json.dump({"new": zone})))
             else
-                tasmota.cmd(string.format("Zone%d %s", id, json.dump({"update": zone})))
+                tasmota.cmd(string.format("HeatingZone%d %s", id, json.dump({"update": zone})))
             end
         end
     end
@@ -137,10 +138,10 @@ class http_manager
     def update_schedule(id)
         # Hydrate a schedule object for a new/update action
         def tosched()
-            var zones = tasmota.cmd("Zones")['Zones']
-            var _zones = []
-            for i: 1 .. size(zones) _zones.push(0) end
-            var s = {'days': [0,0,0,0,0,0,0], 'zones': _zones}
+            var labels = tasmota.cmd("HeatingLabels")['HeatingLabels']
+            var zones = []
+            for i: 1 .. size(labels) zones.push(0) end
+            var s = {'days': [0,0,0,0,0,0,0], 'zones': zones}
             for arg: 0 .. webserver.arg_size()-1
                 # Avoid any garbage args present
                 var name = webserver.arg_name(arg)
@@ -156,18 +157,18 @@ class http_manager
                     s['on'] = value
                 elif name == 'off'
                     s['off'] = value
-                end
+                end 
             end
             return s         
         end        
         if webserver.has_arg('delete')
-            tasmota.cmd(string.format('Schedule%d delete', id))
+            tasmota.cmd(string.format('HeatingSchedule%d delete', id))
         elif webserver.has_arg('update')
             var payload = json.dump({"update": tosched(id)})
-            tasmota.cmd(string.format("schedule%d %s", id, payload))
+            tasmota.cmd(string.format("HeatingSchedule%d %s", id, payload))
         elif webserver.has_arg('new')
             var payload = json.dump({"new": tosched(id)})
-            tasmota.cmd(string.format("schedule %s", payload))
+            tasmota.cmd(string.format("HeatingSchedule %s", payload))
         end
     end
     # Updates options
@@ -187,23 +188,23 @@ class http_manager
         if webserver.has_arg('id')
             var sid = int(webserver.arg('id'))
             var days = tasmota.cmd("HeatingDays")['HeatingDays']
-            var schedules = tasmota.cmd("Schedules")['Schedules']
+            var schedules = tasmota.cmd("HeatingSchedules")['HeatingSchedules']
             var schedule = sid <= size(schedules) ? schedules[sid-1] : nil
-            var labels = tasmota.cmd("ZoneLabels")['ZoneLabels']
+            var labels = tasmota.cmd("HeatingLabels")['HeatingLabels']
             var gui = schedule_ui()
             gui.show_schedules(html['sched-sum'], days, schedules, labels)
             gui.show_editor(sid, html['sched'], days, schedule, labels)
         elif webserver.has_arg('zid')
             var zid = int(webserver.arg('zid'))
-            var zones = tasmota.cmd("Zones")['Zones']
+            var zones = tasmota.cmd("HeatingZones")['HeatingZones']
             var zone = zid <= size(zones) ? zones[zid-1] : nil
             var gui = zone_ui()
             gui.show_zones(html['zone-sum'], zones)
             gui.show_editor(zid, html['zone'], zone)
         else
             var days = tasmota.cmd("HeatingDays")['HeatingDays']
-            var schedules = tasmota.cmd("Schedules")['Schedules']
-            var zones = tasmota.cmd("Zones")['Zones']
+            var schedules = tasmota.cmd("HeatingSchedules")['HeatingSchedules']
+            var zones = tasmota.cmd("HeatingZones")['HeatingZones']
             var labels = []
             for z: 0 .. size(zones)-1 labels.push(zones[z]['label']) end
             zone_ui().show_zones(html['zone-sum'], zones)
@@ -225,66 +226,77 @@ class http_manager
     end
 end
 
-heating_ui.init = def(m)
-    class driver
-        var _button, _enabled, wd
-        def init()
-            self._enabled = false
-            
+heating_ui.wd = ''
+
+class driver
+    var _button, _enabled
+    def init()
+        self._enabled = false
+        # Subscribe to events sent from Heating Controller
+        tasmota.add_rule("HeatingUI==ON", /->tasmota.set_timer(0, /->self.start()))
+        tasmota.add_rule("HeatingUI==OFF", /->self.stop())
+        tasmota.add_rule("HeatingUI==SYN", /->tasmota.set_timer(0, /->self.ack()))
+        # Once UI loads an initialisation trigger is broadcast
+        self.ack()          
+    end
+    # Used to load HTML for Configure Heating UI
+    def load_file(fn)
+        tasmota.log("html loaded...")
+        var obj, f
+        f = open(heating_ui.wd .. fn, 'r')
+        obj = json.load(f.read())
+        f.close()
+        return obj
+    end        
+    # Displays a "Configure Heating" button on the configuration page
+    def web_add_config_button()
+        if !self._button
+            self._button = self.load_file('html.json')['button']
         end
-        # Used to load HTML for Configure Heating UI
-        def load_file(fn)
-            var obj, f
-            f = open(self.wd .. fn, 'r')
-            obj = json.load(f.read())
-            f.close()
-            return obj
-        end        
-        # Displays a "Configure Heating" button on the configuration page
-        def web_add_config_button()
-            if !self._button
-                self._button = self.load_file('html.json')['button']
-            end
-            webserver.content_send(self._button)
-        end
-        # Add HTTP POST and GET handlers
-        def web_add_handler()
-            webserver.on('/hm', / -> self.http_get(), webserver.HTTP_GET)
-            webserver.on('/hm', / -> self.http_post(), webserver.HTTP_POST)
-        end
-        def http_get()
-            if !self._enabled self.linkhome() end 
-            var html = self.load_file('html.json')
-            http_manager().on_http_get(html)
-        end
-        def http_post()
-            if !self._enabled self.linkhome() end
-            http_manager().on_http_post()
-            self.http_get()
-        end
-        def linkhome()
-            webserver.content_start('Configure Heating')
-            webserver.content_send_style()
-            webserver.content_send(self.load_file('html.json')['help'])
-            webserver.content_button(webserver.BUTTON_CONFIGURATION)
-            webserver.content_stop()
-        end
-        def start()
-            if !self._enabled
-                tasmota.add_driver(self)
-                self.web_add_handler()
-                self._enabled = true
-            end
-        end
-        def stop()
-            if self._enabled
-                tasmota.remove_driver(self)
-                self._enabled = false
-            end
+        webserver.content_send(self._button)
+    end
+    # Add HTTP POST and GET handlers
+    def web_add_handler()
+        webserver.on('/hm', / -> self.http_get(), webserver.HTTP_GET)
+        webserver.on('/hm', / -> self.http_post(), webserver.HTTP_POST)
+    end
+    def http_get()
+        if !self._enabled self.linkhome() end 
+        var html = self.load_file('html.json')
+        http_manager().on_http_get(html)
+    end
+    def http_post()
+        if !self._enabled self.linkhome() end
+        http_manager().on_http_post()
+        self.http_get()
+    end
+    def linkhome()
+        webserver.content_start('Configure Heating')
+        webserver.content_send_style()
+        webserver.content_send(self.load_file('html.json')['help'])
+        webserver.content_button(webserver.BUTTON_CONFIGURATION)
+        webserver.content_stop()
+    end
+    def start()
+        if !self._enabled
+            tasmota.add_driver(self)
+            self.web_add_handler()
+            self._enabled = true
         end
     end
-    return driver()
+    def stop()
+        if self._enabled
+            tasmota.remove_driver(self)
+            self._enabled = false
+        end
+    end
+    def ack()
+        tasmota.publish_result('{"HeatingUI":"ACK"}', 'RESULT')
+    end
 end
+
+# Create and hold a reference to the driver
+var d = driver()
 
 return heating_ui
 

@@ -15,9 +15,9 @@ This heating controller gives independent time control over multiple channels or
 * Individual WS2812 LED pixels can indicate zone status 
 * One physical push button per zone is supported with different actions available via single, double and triple press.
 * Each zone can be put into manual override. Several manual override modes are available (see Operating Modes below)
-* The heating controller can be configured and controlled using custom commands (see below). The 'Manage Heating' UI is built entirely using these commands. It is therefore possible to build your own UI using these commands only.
+* The heating controller can be configured and controlled using custom commands (see below). The 'Configure Heating' UI is built entirely using these commands. It is therefore possible to build your own UI using these Tasmota commands.
 * If Alexa/Hue emulation is enabled, when the power state of the relay is changed via Alexa (or MQTT or by pressing the Tasmota web UI relay buttons) the relevant heating zone's status is synchronised.
-* Two types of display are supported: 1) A basic HD44780 20x4 I2C LCD, or 2) a 320x240/480x320 SPI ILI9341 or similar with XPT2046 touch controller. If either of these devices is attached and correctly configured the heating controller will detect and use the appropriate display. NB for the touch screen the latest pre-compiled tassmota32-lvgl.bin development firmware is required. Before installing the heating controller app the touch screen should be calibrated using the [calibration app](https://github.com/arendst/Tasmota/pull/14459). Both screens can display up to 3 zones. The display is not enabled by default so you will need to enable the option on the Configure Heating page.
+* Two types of display are supported: 1) A basic HD44780 20x4 I2C LCD, or 2) a 320x240/480x320 SPI ILI9341 or similar with XPT2046 touch controller. NB for the touch screen the latest pre-compiled tassmota32-lvgl.bin development firmware is required. Before installing the heating controller app the touch screen should be calibrated using the [calibration app](https://github.com/arendst/Tasmota/pull/14459). Both screens can display up to 3 zones. The display is not enabled by default so you will need to enable the option on the Configure Heating page.
 
 ILI9341 / XP2046 Display (using Tasmota32-lvgl.bin firmware)
 
@@ -97,11 +97,29 @@ If you live in a region with daylight saving you might want to specify a std/dst
 
 Don't forget to configure MQTT if you wish to receive Heating Controller telemetry.
 
-### 4. Upload Tasmota Application file (heating.tapp)
+### 4. Upload Tasmota Application files (tapps)
 
 Navigate to **Consoles | Manage File system** and upload the following Tasmota Application from the repository:
 
-[heating.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/blob/main/bin/heating.tapp)
+The heating controller host application (required)
+
+[hc_host.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/blob/main/bin/)
+
+The heating controller web UI (recommended)
+
+[hc_webgui.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/tree/main/modules/hc_webgui/bin/)
+
+Basic 4x20 dot matrix display support (optional)
+
+[hc_lcd.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/tree/main/modules/lcd_display/bin)
+
+LVGL Touchscreen display support (optional)
+
+[hc_lvgl.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/tree/main/modules/lvgl_display/bin) (Requires tasmota32-lvgl.bin firmware)
+
+Antiburn support (optional - see commands below)
+
+[antiburn.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/tree/main/modules/antiburn/bin)
 
 ## Operation
 
@@ -137,15 +155,15 @@ Options can be enabled/disabled by using the Configure Heating web page.
 
 Command|Parameters
 :---|:---
-`zone<x>`| publishes mqtt info for `zone<x>`:<br>`zone1` -> `{"Zone":{"power":"On","label":"HTG1","expiry":1644188400,"id":1,"mode":"Auto","until":"2022-02-06T23:00:00"}}`<br><br>With power param:<br>`zone1 1`<br><br>where<br>`0/off/false` = turn OFF<br>`1/on/true` = turn ON<br><br>To update a zone's label or mode:<br>`zone<x> {"update": {"mode": 5, "label": "HTG1"}`<br><br>When mode = 1 (boost), specify hours:<br>`zone<x> {"update": {"mode": 1, "hours": 2}}`<br><br>To add a new zone:<br>`zone {"new": {"label": "2nd Flr", "mode": 1}}`<br><br>where mode :<br>`0` (Auto)<br>`1` (Boost)<br>`2` (Const On)<br>`3` (Const Off)<br>`4` (Adv)<br>`5` (All Day)<br><br>To delete a zone:<br>`zone<x> delete`  
-`zones`| publishes info for all zones  
-`schedule<x>`| publishes mqtt info for `schedule<x>`:<br>`schedule1` -> `{"Schedule": {"id": 1, "on": "06:30", "zones": [1,1,1], "days": [0,1,1,1,1,1,0], "off": "08:30"}}`<br><br> To update a schedule:<br>`schedule<x> {"update": {"on": "06:30", "zones": [1,1,1], "days": [0,1,1,1,1,1,0], "off": "08:30"}}`<br><br>To add a new schedule:<br>`schedule {"new": {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}}`<br><br>To delete a schedule use the `delete` param:<br>`schedule<x> delete`<br><br>The payload on/off times must be in 24-hour HH:MM format and the off time must be later than the on time. Zones/Days must be a list of 1 or 0 values to indicate if the zones/days are enabled. `"days": [0,1,1,1,1,1,0]` indicates that the schedule should run Mon-Fri. `"zones": [1,1,0]` indicates that zones 1 & 2 are enabled and zone 3 is disabled for the schedule. The list of zones must match the number of zones configured.
-`schedules`| publishes info for all schedules  
-`heatingoptions` | When no json payload is specified the command returns the current settings for all options:<br>`{"HeatingOptions": {"CMD": 1,"LED": 1,"DISPLAY": 1,"SYNC": 1,"MQTT": 1}}`<br><br>`0` = OFF<br>`1` = ON<br><br>To set 1 or more options use a json payload and specify the option name as string and <br><br>`0/off/false` to turn option off<br>`1/on/true` to turn option on:<br><br>`heatingoptions {"LED": 1, "Display": 1}`  
-`zonelabels` | Publishes a list of zone labels:<br>`{"ZoneLabels": ["HTG1", "HTG2", "WATER"]}`  
-`heatingmodes` | Publishes a list of heating modes:<br>`{"HeatingModes": ["Auto", "Boost", "On", "Off", "Adv", "Day"]}`  
-`heatingdays` | Publishes a list of week day names:<br>`{"HeatingDays": ["Sun", "Mon", "Tue", "Wed","Thu", "Fri", "Sat"]}`  
-`antiburn` | If an LCD/OLED display is being used and LVGL is present you can use this command to activate an antiburn screen wash. The screen will change from black -> Red -> Green -> Blue -> White every second for 30 seconds or until the screen is touched. This command requires the supplementary [Antiburn.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/tree/main/modules/antiburn/bin) to be uploaded to the file system. The antiburn command can be scheduled to run using a Timer and Rule (see Tasmota documentation for how to set up a timer to trigger a rule).
+`HeatingZone<x>`| publishes mqtt info for `HeatingZone<x>`:<br>`HeatingZone1` -> `{"HeatingZone":{"mode":0,"label":"HTG1","expiry":1644737400,"info":"HTG1 Auto Off until 07:30 Sun 13 Feb 22","id":1,"power":false}}`<br><br>With power param:<br>`HeatingZone1 1`<br><br>where<br>`0/off/false` = turn OFF<br>`1/on/true` = turn ON<br><br>To update a zone's label or mode:<br>`HeatingZone<x> {"update": {"mode": 5, "label": "HTG1"}`<br><br>When mode = 1 (boost), specify hours:<br>`HeatingZone<x> {"update": {"mode": 1, "hours": 2}}`<br><br>To add a new zone:<br>`HeatingZone {"new": {"label": "2nd Flr", "mode": 1}}`<br><br>where mode :<br>`0` (Auto)<br>`1` (Boost)<br>`2` (Const On)<br>`3` (Const Off)<br>`4` (Adv)<br>`5` (All Day)<br><br>To delete a zone:<br>`HeatingZone<x> delete`  
+`HeatingZones`| publishes info for all zones  
+`HeatingSchedule<x>`| publishes mqtt info for `HeatingSchedule<x>`:<br>`HeatingSchedule1` -> `{"HeatingSchedule": {"id": 1, "on": "06:30", "zones": [1,1,1], "days": [0,1,1,1,1,1,0], "off": "08:30"}}`<br><br> To update a schedule:<br>`HeatingSchedule<x> {"update": {"on": "06:30", "zones": [1,1,1], "days": [0,1,1,1,1,1,0], "off": "08:30"}}`<br><br>To add a new schedule:<br>`HeatingSchedule {"new": {"on":"06:30","zones":[1,1,1],"days":[0,1,1,1,1,1,0],"off":"08:30"}}`<br><br>To delete a schedule use the `delete` param:<br>`HeatingSchedule<x> delete`<br><br>The payload on/off times must be in 24-hour HH:MM format and the off time must be later than the on time. Zones/Days must be a list of 1 or 0 values to indicate if the zones/days are enabled. `"days": [0,1,1,1,1,1,0]` indicates that the schedule should run Mon-Fri. `"zones": [1,1,0]` indicates that zones 1 & 2 are enabled and zone 3 is disabled for the schedule. The list of zones must match the number of zones configured.
+`HeatingSchedules`| publishes info for all schedules  
+`HeatingOptions` | When no json payload is specified the command returns the current settings for all options:<br>`{"HeatingOptions": {"CMD": 1,"LED": 1,"DISPLAY": 1,"SYNC": 1,"MQTT": 1}}`<br><br>`0` = OFF<br>`1` = ON<br><br>To set 1 or more options use a json payload and specify the option name as string and <br><br>`0/off/false` to turn option off<br>`1/on/true` to turn option on:<br><br>`HeatingOptions {"LED": 1, "Display": 1}`  
+`HeatingLabels` | Publishes a list of zone labels:<br>`{"HeatingLabels": ["HTG1", "HTG2", "WATER"]}`  
+`HeatingModes` | Publishes a list of heating modes:<br>`{"HeatingModes": ["Auto", "Boost", "On", "Off", "Adv", "Day"]}`  
+`HeatingDays` | Publishes a list of week day names:<br>`{"HeatingDays": ["Sun", "Mon", "Tue", "Wed","Thu", "Fri", "Sat"]}`  
+`Antiburn` | If an LCD/OLED display is being used and LVGL is present you can use this command to activate an antiburn screen wash. The screen will change from black -> Red -> Green -> Blue -> White every second for 30 seconds or until the screen is touched. This command requires the supplementary [Antiburn.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/tree/main/modules/antiburn/bin) to be uploaded to the file system. The antiburn command can be scheduled to run using a Timer and Rule (see Tasmota documentation for how to set up a timer to trigger a rule).
 
 ## Known Issues
 
