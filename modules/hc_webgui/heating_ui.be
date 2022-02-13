@@ -77,7 +77,7 @@ class zone_ui
     def show_editor(zid, html, z)
         var modes = tasmota.cmd('HeatingModes')['HeatingModes']
         var action = z != nil ? 'update' : 'new'
-        z = z ? z : {'label': 'ZN' .. zid, 'mode': 'Auto'}
+        z = z ? z : {'label': 'ZN' .. zid, 'mode': 0}
         webserver.content_send(string.format(html[0], zid, zid, z['label']))
         for k: 0 .. size(modes)-1
             var mode = modes[k]
@@ -241,7 +241,6 @@ class driver
     end
     # Used to load HTML for Configure Heating UI
     def load_file(fn)
-        tasmota.log("html loaded...")
         var obj, f
         f = open(heating_ui.wd .. fn, 'r')
         obj = json.load(f.read())

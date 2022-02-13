@@ -107,7 +107,7 @@ The heating controller host application (required)
 
 The heating controller web UI (recommended)
 
-[hc_webgui.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/tree/main/modules/hc_webgui/bin/)
+[hc_wgui.tapp](https://github.com/Beormund/Tasmota32-Multi-Zone-Heating-Controller/tree/main/modules/hc_webgui/bin/)
 
 Basic 4x20 dot matrix display support (optional)
 
