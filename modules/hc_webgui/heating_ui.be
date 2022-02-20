@@ -37,32 +37,35 @@ class schedule_ui
         webserver.content_send(string.format(html[2], new_id ))
     end
     # Displays a web control for editing a single schedule
-    def show_editor(id, html, days, s, labels)
+    def show_editor(id, html, days, s, labels, therm)
         var action = s ? 'update' : 'new'
         var _zones = []
         for i: 1 .. size(labels) _zones.push(0) end
         s = s ? s : {"on": "00:00", "off": "00:00", "days": [0,0,0,0,0,0,0], "zones": _zones, "target temp": nil}
         webserver.content_send(html[0])
         webserver.content_send(string.format(html[1], id))
-        var target = s['target temp'] != nil ? s['target temp'] : ''
-        webserver.content_send(string.format(html[2], id, s['on'], s['off'], target))
-        webserver.content_send(html[3])
+        webserver.content_send(string.format(html[2], id, s['on'], s['off']))
+        if therm
+            var target = s['target temp'] != nil ? s['target temp'] : ''
+            webserver.content_send(string.format(html[3], target))
+        end
+        webserver.content_send(html[4])
         for d: 0 .. size(days)-1
             var checked = s['days'][d] ? 'checked' : ''
             var dl = days[d]
-            webserver.content_send(string.format(html[4], dl, d, checked, dl, dl))
+            webserver.content_send(string.format(html[5], dl, d, checked, dl, dl))
         end
-        webserver.content_send(html[5])
+        webserver.content_send(html[6])
         for z: 0 .. size(labels)-1
             var checked = s['zones'][z] ? 'checked' : ''
             var zl = labels[z]
-            webserver.content_send(string.format(html[6], zl, z, checked, zl, zl))
+            webserver.content_send(string.format(html[7], zl, z, checked, zl, zl))
         end
-        webserver.content_send(string.format(html[7], action, id))
+        webserver.content_send(string.format(html[8], action, id))
         if action == 'update'
-            webserver.content_send(html[8])
+            webserver.content_send(html[9])
         end
-        webserver.content_send(html[9])
+        webserver.content_send(html[10])
     end
 end
 
@@ -78,33 +81,36 @@ class zone_ui
         webserver.content_send(html[3])
     end
     # Displays a web control for editing a single zone
-    def show_editor(zid, html, z)
+    def show_editor(zid, html, z, therm)
         var modes = tasmota.cmd('HeatingModes')['HeatingModes']
         var action = z != nil ? 'update' : 'new'
         z = z ? z : {'label': 'ZN' .. zid, 'mode': 0, 'target temp': nil}
-        var target = z['target temp'] != nil ? z['target temp'] : ''
         webserver.content_send(html[0])
         webserver.content_send(string.format(html[1], zid, zid))
-        webserver.content_send(string.format(html[2], z['label'], target))
+        webserver.content_send(string.format(html[2], z['label']))
+        if therm
+            var target = z['target temp'] != nil ? z['target temp'] : ''
+            webserver.content_send(string.format(html[3], target))
+        end
+        webserver.content_send(html[4])
         for k: 0 .. size(modes)-1
             var mode = modes[k]
             var checked = z['mode'] == k ? 'checked' : ''
-            webserver.content_send(string.format(html[3], mode, k, checked, mode, mode))
+            webserver.content_send(string.format(html[5], mode, k, checked, mode, mode))
         end
-        webserver.content_send(html[4])
-        webserver.content_send(string.format(html[5], action))
+        webserver.content_send(html[6])
+        webserver.content_send(string.format(html[7], action))
         if action == 'update'
-            webserver.content_send(html[6])
+            webserver.content_send(html[8])
         end
-        webserver.content_send(html[7])
+        webserver.content_send(html[9])
     end
 end
 
 # Displays options in 'Configure Heating'
 class options_ui
-    def show_options(html)
+    def show_options(html, options)
         webserver.content_send(html[0])
-        var options = tasmota.cmd("HeatingOptions")['HeatingOptions']
         for k: options.keys()
             var checked = options[k] ? 'checked' : ''
             webserver.content_send(string.format(html[1], k, checked, k, k))
@@ -206,6 +212,8 @@ class http_manager
     #  Determines which widgets are displayed
     def on_http_get(html)
         if !webserver.check_privileged_access() return nil end
+        var options = tasmota.cmd("HeatingOptions")['HeatingOptions']
+        var therm = options['THERM']
         webserver.content_start('Configure Heating')
         webserver.content_send_style()
         if webserver.has_arg('id')
@@ -216,14 +224,14 @@ class http_manager
             var labels = tasmota.cmd("HeatingLabels")['HeatingLabels']
             var gui = schedule_ui()
             gui.show_schedules(html['sched-sum'], days, schedules, labels)
-            gui.show_editor(sid, html['sched'], days, schedule, labels)
+            gui.show_editor(sid, html['sched'], days, schedule, labels, therm)
         elif webserver.has_arg('zid')
             var zid = int(webserver.arg('zid'))
             var zones = tasmota.cmd("HeatingZones")['HeatingZones']
             var zone = zid <= size(zones) ? zones[zid-1] : nil
             var gui = zone_ui()
             gui.show_zones(html['zone-sum'], zones)
-            gui.show_editor(zid, html['zone'], zone)
+            gui.show_editor(zid, html['zone'], zone, therm)
         else
             var days = tasmota.cmd("HeatingDays")['HeatingDays']
             var schedules = tasmota.cmd("HeatingSchedules")['HeatingSchedules']
@@ -232,7 +240,7 @@ class http_manager
             for z: 0 .. size(zones)-1 labels.push(zones[z]['label']) end
             zone_ui().show_zones(html['zone-sum'], zones)
             schedule_ui().show_schedules(html['sched-sum'], days, schedules, labels)
-            options_ui().show_options(html['options'])
+            options_ui().show_options(html['options'], options)
         end
         webserver.content_button(webserver.BUTTON_CONFIGURATION)
         webserver.content_stop()

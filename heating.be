@@ -140,14 +140,14 @@ class util
     # DISPLAY:  Enable support for I2C LCD 20x4/20x2 display or SPI 320x240 ILI9341 (default: false)
     # CMD:  Enable Tasmota/MQTT "zone" command to change a zone's mode (default: true)
     # LED:  Enable addressable LED indicator lights (WS2812 pin needs to be set) (default: true)
-    # SYNC: Enable Tasmota UI toggle button names to be kept in sync with zone names (default: false)
+    # THERMC: Enable thermostat integration (default: false)
     # MQTT: Enable the publishing of MQTT heating zone telemetry (default: true)
     # --------------------------------------------------------------------------------------------------
     static options = {
         'DISPLAY': 1, # 1 << 0
         'UI': 2, # 1 << 1
         'LED': 4, # 1 << 2
-        'SYNC': 8, # 1 << 3
+        'THERM': 8, # 1 << 3
         'MQTT': 16 # 1 << 4
     }
     # Allowed custom command parameter values
@@ -265,7 +265,9 @@ class status
     # Set the relay power state
     def set_relay()
         # Only set the power on if room temp < target temp
-        var heat =  api.settings.zones[self.zone].heat()
+        var heat = util.config.is_option_set(util.options['THERM'])
+            ? api.settings.zones[self.zone].heat()
+            : true        
         api.set_power(self.zone, self.power && heat)
     end
     # Update Alexa power state
@@ -370,7 +372,7 @@ class zone: map
                 assert(m[k] == 1 || m[k] == 2, msg(k))
                 # hours is not a member of zone so convert to expiry
                 z[zone.expiry] = m[k] * 3600
-            elif key == 'target' || key == 'room'
+            elif (key == 'target' || key == 'room') && util.config.is_option_set(util.options['THERM'])
                 if m[k] != nil
                     assert(type(m[k]) == "int" || type(m[k]) == "real", msg(k))
                 end
@@ -415,7 +417,9 @@ class zone: map
     end
     def set_relay(zone)
         var power = self.get_power(self.get_mode())
-        var heat = self.heat()
+        var heat = util.config.is_option_set(util.options['THERM'])
+            ? self.heat() 
+            : true
         api.set_power(zone, power && heat)
     end
     # Returns the zone's mode (current or previous)
@@ -438,15 +442,18 @@ class zone: map
     end
     def tojson()
         var m = self.get_mode()
-        return {
+        var z = {
             "label": self[self.label],
             "mode": m,
             "power": self.get_power(m),
             "expiry": 12&(1<<m) ? 0 : self[self.expiry],
-            "info": self.get_info(m),
-            "target temp": self.get_temp(self.target),
-            "room temp": self.get_temp(self.room)
+            "info": self.get_info(m)
         }
+        if util.config.is_option_set(util.options['THERM'])
+            z["target temp"] = self.get_temp(self.target)
+            z["room temp"] = self.get_temp(self.room)
+        end
+        return z
     end
 end
 
@@ -591,7 +598,7 @@ class schedule: map
                 end
                 assert(x > 0, msg(k, "must contain at leat one " .. k[0..-2]))
                 sched[key == 'days' ? schedule.days : schedule.zones] = x
-            elif key == 'target'
+            elif key == 'target' && util.config.is_option_set(util.options['THERM'])
                 if m[k] != nil
                     assert(type(m[k]) == "int" || type(m[k]) == "real", msg("target"))
                 end
@@ -705,14 +712,17 @@ class schedule: map
         return !self==(o)
     end
     def tojson()
-        return {
+        var s =  {
             "on": self.secs2str(self[self.on]),
             "off": self.secs2str(self[self.off]),
             "id": self[self.id],
             "days": self.days2list(),
-            "zones": self.zones2list(),
-            "target temp": self.find(self.target)
+            "zones": self.zones2list()
         }
+        if util.config.is_option_set(util.options['THERM'])
+            s["target temp"] = self.find(self.target)
+        end
+        return s
     end
 end
 
@@ -896,18 +906,16 @@ class config
             set ? self.enable_display(configure) : self.disable_display()
         elif opt == util.options['LED']
             set ? self.enable_leds(configure) : self.disable_leds()
-        elif opt == util.options['SYNC'] && set
-            self.set_webbuttons()
         elif opt == util.options['UI']
             self.toggle_ui(set)
         end
     end
     # Configures options - called by HeatingController on startup
     def configure_options()
-        for opt: {'LED': 4,'SYNC': 8}
-            # Configure all other options on startup.
-            self.configure_option(opt, self.is_option_set(opt))
-        end
+        self.configure_option(
+            util.options['LED'], 
+            self.is_option_set(util.options['LED'])
+        )
     end
     # If UI option is set, enable the Tasmota UI
     # Obviously if the UI is disabled from the UI it can
@@ -956,19 +964,6 @@ class config
         if util.WS2812
             util.WS2812.clear()
             util.WS2812 = nil
-        end
-    end
-    # If sync_webbuttons is true set the relay toggle button to label
-    def set_webbutton(btn, label)
-        # Don't set the quasi Light/WS2812 button; only relays...
-        if btn > api.get_relay_count() return end 
-        api.cmd(string.format('webbutton%d %s', btn, label))
-    end
-    def set_webbuttons()
-        var z = 0
-        while z < size(api.settings.zones)
-            self.set_webbutton(z+1, api.settings.zones.get_label(z))
-            z += 1
         end
     end
     # Saves the configuration to _persist.json
@@ -1095,11 +1090,6 @@ class scheduler
     # Called when a schedule on or off time expires/completes
     def on_pop(s, running)
         if !self.running return end
-        # Get the power state for the schedule
-        var power = s.is_running()
-        if power != running
-            api.log("warning: is_running():" .. power .. "!=on_pop(running):" .. running)
-        end
         # Check each zone for the schedule
         var zone = 0
         while zone < size(api.settings.zones)
@@ -1447,7 +1437,7 @@ end
 
 # Publishes the status for all options as json payload.
 # Updates the status of 1 or more options
-# HeatingOptions -> {"HeatingOptions":{"CMD":1,"LED":1,"DISPLAY":1,"SYNC":1,"MQTT":1}}
+# HeatingOptions -> {"HeatingOptions":{"CMD":1,"LED":1,"DISPLAY":1,"THERM":1,"MQTT":1}}
 class options_command: command
     static cmd = "HeatingOptions"
     def init() super(self).init() end
@@ -1563,26 +1553,26 @@ class zone_command: command
         if !size(payload[zone.label])
             payload[zone.label] = 'ZN' .. idx+1
         end
-        if payload.contains('target') && payload['target'] == nil
-            payload.remove('target')
+        if payload.contains(zone.target) && payload[zone.target] == nil
+            payload.remove(zone.target)
         end
-        if payload.contains('room') && payload['room'] == nil
-            payload.remove('room')
+        if payload.contains(zone.room) && payload[zone.room] == nil
+            payload.remove(zone.room)
         end
         # Add the new zone to the zones collection
         api.settings.zones.push(zone(payload))
         # Add the new zone to schedules
         api.settings.schedules.set_zone(idx)
+        # Now we need to set target_temp
+        if payload.contains(zone.target)
+            api.settings.zones[idx].set_target_temp(payload[zone.target])
+        end
         # Add a new Alexa device
         if util.alexa
             util.alexa.add_device(idx+1, payload[zone.label])
         end
         # Sync button triggers
         util.buttons.add_trigger(idx)
-        # Sync the Tasmota UI Toggle buttons
-        if util.config.is_option_set(util.options['SYNC'])
-            util.config.set_webbutton(idx+1, payload[zone.label])
-        end
         # Process mode and force update as this is a new zone
         self.set_mode(idx, payload, true)
         if payload[zone.mode]
@@ -1594,11 +1584,16 @@ class zone_command: command
     end
     def update(idx, payload)
         # Process temperatures
-        def set_temp(t, f)
-            return api.settings.zones[idx].set_temp(f, t)
+        def set_temp(f)
+            if payload.contains(f)
+                return api.settings.zones[idx].set_temp(f, payload[f])
+            end
         end
-        var target = set_temp(payload.find(zone.target), zone.target)
-        var room = set_temp(payload.find(zone.room), zone.room)
+        var target = set_temp(zone.target)
+        if target
+            api.settings.zones[idx].set_target_temp(payload[zone.target])
+        end
+        var room = set_temp(zone.room)
         if target || room
             api.settings.zones[idx].set_relay(idx)
         end
@@ -1614,10 +1609,6 @@ class zone_command: command
                     util.alexa.add_device(idx+1, label)
                 end
                 _dirty = true
-                    # Sync the Tasmota UI Toggle buttons
-                if util.config.is_option_set(util.options['SYNC'])
-                    util.config.set_webbutton(idx+1, label)
-                end
             end
         end
         # Process mode
@@ -1668,10 +1659,6 @@ class zone_command: command
             var stat = api.settings.zones.get_status(z)
             # Notify display etc.
             stat.notify()
-        end
-        # Sync the Tasmota UI Toggle buttons
-        if util.config.is_option_set(util.options['SYNC'])
-            util.config.set_webbuttons()
         end
         util.config.save()
     end
@@ -1739,8 +1726,8 @@ class schedule_command: command
         self.resp_cmnd(idx)
     end
     def new(payload)
-        if payload.contains('target') && payload['target'] == nil
-            payload.remove('target')
+        if payload.contains(schedule.target) && payload[schedule.target] == nil
+            payload.remove(schedule.target)
         end
         if api.settings.schedules.push(payload, true) util.restart() end
     end
