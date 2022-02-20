@@ -171,29 +171,8 @@ class util
     static driver = nil
     # The buttons class handles button clicks (1 button per heating zone)
     static buttons = nil
-    # The relays class handles relay power state changes
-    static relays = nil
-    # Calls a function passing in a time formatter
-    static def set_time(callback)
-        var t = api.now()['local']
-        callback(/fmt-> api.strftime(fmt, t), t)
-    end
-    # Used to create timers for override boost and displaying time
-    static def set_timer(millis, callback, id, repeat)
-        var now = api.now()
-        api.set_timer(
-            millis(now),
-            def()
-                util.set_time(callback)
-                if !repeat return end
-                util.set_timer(millis, callback, id, repeat)
-            end,
-            id
-        )
-    end
-    static def remove_timer(id)
-        api.remove_timer(id)
-    end
+    # The alexa class handles comms with Alexa
+    static alexa = nil
     # find a key in map, case insensitive, return actual key or nil if not found
     static def find_key_i(m, keyi)
         var keyu = string.toupper(keyi)
@@ -227,14 +206,41 @@ class ui
     end
 end
 
+class time
+    # Used to create timers for override boost and displaying time
+    static def set_timer(millis, callback, id, repeat)
+        var now = api.time_dump(api.rtc()['local'])
+        api.set_timer(
+            millis(now),
+            def()
+                var t = api.rtc()['local']
+                callback(/fmt-> api.strftime(fmt, t), t)
+                if !repeat return end
+                time.set_timer(millis, callback, id, repeat)
+            end,
+            id
+        )
+    end
+    static def round(time, interval)
+        var offset = time % interval
+        var rounded = time - offset
+        if offset > interval/2
+          return rounded + interval
+        else
+          return rounded
+        end
+    end
+end
+
 # A status contains information about the current state of a zone
 class status
-    var zone, mode, power, expiry, label, key, state
+    var zone, mode, power, expiry, label, key, state, target
     # @param zone: index of zone from api.settings.zones
     # @param mode: which mode the zone is currently set to
     # @param power: on/off state of zone
     # @param expiry: next on/off time for auto or expiry for boost
-    def init(zone, mode, power, expiry)
+    # @param target: target temperature (from zone or schedule)
+    def init(zone, mode, power, expiry, target)
         self.zone = zone
         self.label = api.settings.zones.get_label(self.zone)
         self.mode = mode
@@ -242,8 +248,9 @@ class status
         self.power = power
         self.state = self.power ? 'On' : 'Off'
         self.expiry = expiry
+        self.target = target
     end
-    # Display max 20 chars: e.g., 'HTG1 off until 16:30'
+    # Publishes a payload to trigger a display update
     def update_display()
         if !util.config.is_option_set(util.options['DISPLAY']) return end
         disp.publish(self.tojson())
@@ -254,6 +261,21 @@ class status
         var color = self.power ? util.colors[self.mode] : 0xFF0000
         util.WS2812.set_pixel_color(self.zone, color)
         util.WS2812.show()
+    end
+    # Set the relay power state
+    def set_relay()
+        # Only set the power on if room temp < target temp
+        var heat =  api.settings.zones[self.zone].heat()
+        api.set_power(self.zone, self.power && heat)
+    end
+    # Update Alexa power state
+    def set_alexa()
+        if util.alexa
+            util.alexa.set_power(self.zone, self.power)
+        end
+    end
+    def set_target()
+        api.settings.zones[self.zone].set_target_temp(self.target)
     end
     # Publish this status as an MQTT message
     def pub_mqtt()
@@ -292,10 +314,13 @@ class status
     end
     # Update logs, LED, MQTT and screen
     def notify()
+        self.set_target()
         self.set_sensor()
         self.set_led()
         self.pub_mqtt()
         self.update_display()
+        self.set_relay()
+        self.set_alexa()
     end
     # Helper map for self.pub_mqtt()
     def tojson()
@@ -311,8 +336,10 @@ end
 # zone['m'] = mode (6 bit for previous & current)
 # zone['p'] = power (2 bit for auto & override)
 class zone: map
-    static label = 'l', expiry = 'e', mode = 'm', power = 'p'
-    var sensor
+    static label = 'l', expiry = 'e', mode = 'm', power = 'p', room = 'r', target = 't'
+    # The scheduler will set zone.target to schedule[schedule.target] when schedule starts
+    # The scheduler will set zone.target to zone[zone.target] when schedule stops
+    var sensor, target_temp
     def init(o)
         self.sensor = ''
         super(self).init()
@@ -320,34 +347,76 @@ class zone: map
         for k: o.keys()
             self[k] = o[k]
         end
+        self.target_temp = self.get_temp(zone.target)
     end
     # validates json payload values if keys present:
     # {"label": "Zone 1", "mode": 0} or {"label": "Zone 1", "mode": 1, "hours": 2}
     # If validation successful returns a zone instance else raises an assert_failed error 
-    static def fromjson(m)
-        var zone = zone()
+    static def fromjson(m, action)
+        # If payload is from an update return only keys updated
+        var z = action == 'update' ? {} : zone()
         var msg = / s -> string.format("Error: %s invalid or missing", s)
         for k: m.keys()
             var key = string.tolower(k)
             if key == 'label'
                 assert(type(m[k]) == 'string', msg(k))
-                zone[zone.label] = m[k]
+                z[zone.label] = m[k]
             elif key == 'mode'
                 assert(type(m[k]) == 'int', msg(k))
                 assert(m[k] >=0 && m[k] < size(util.modes), msg(k)) 
-                zone[zone.mode] = m[k]
+                z[zone.mode] = m[k]
             elif key == 'hours'
                 assert(type(m[k]) == "int", msg(k))
                 assert(m[k] == 1 || m[k] == 2, msg(k))
                 # hours is not a member of zone so convert to expiry
-                zone[zone.expiry] = m[k] * 3600
+                z[zone.expiry] = m[k] * 3600
+            elif key == 'target' || key == 'room'
+                if m[k] != nil
+                    assert(type(m[k]) == "int" || type(m[k]) == "real", msg(k))
+                end
+                z[key == 'target' ? zone.target : zone.room] = m[k]
             end
         end
-        if zone.contains(zone.mode) && zone[zone.mode] == 1
+        if z.contains(zone.mode) && z[zone.mode] == 1
             # If mode is boost then expiry should be > 0
-            assert(zone[zone.expiry] > 0, msg('hours'))
+            assert(z[zone.expiry] > 0, msg('hours'))
         end
-        return zone
+        return z
+    end
+    def get_temp(field)
+        return self.find(field)
+    end
+    def set_temp(field, temp)
+        if self.get_temp(field) != temp
+            if temp != nil
+                self[field] = temp
+            else
+                self.remove(field)
+            end
+            return true
+        end
+    end
+    def set_target_temp(temp)
+        # Only use a schedule target temp if mode is Auto or Day
+        var auto_or_day = 33 & (1<<self.get_mode())
+        if auto_or_day && self.get_power() && temp
+            self.target_temp = temp
+        else
+            self.target_temp = self.get_temp(zone.target)
+        end
+    end
+    def heat()
+        var target = self.target_temp
+        var room = self.get_temp(self.room)
+        if target != nil && room != nil
+            return room < target
+        end
+        return true
+    end
+    def set_relay(zone)
+        var power = self.get_power(self.get_mode())
+        var heat = self.heat()
+        api.set_power(zone, power && heat)
     end
     # Returns the zone's mode (current or previous)
     def get_mode(p)
@@ -358,14 +427,14 @@ class zone: map
     def get_power(m)
         return !!((self[self.power] >> int(!m)) & 1)
     end
-    def get_info()
-        var fmt = 12&(1<<self.get_mode())
+    def get_info(m)
+        var fmt = 12&(1<<m)
             ? '%s Const %s' 
             : '%s %s %s until %%H:%%M %%a %%d %%b %%y'
         return api.strftime(string.format(fmt, 
             self[self.label], 
-            util.modes[self.get_mode()], 
-            self[self.power] ? 'On' : 'Off'), self[self.expiry])
+            util.modes[m], 
+            self.get_power(m) ? 'On' : 'Off'), self[self.expiry])
     end
     def tojson()
         var m = self.get_mode()
@@ -374,7 +443,9 @@ class zone: map
             "mode": m,
             "power": self.get_power(m),
             "expiry": 12&(1<<m) ? 0 : self[self.expiry],
-            "info": self.get_info()
+            "info": self.get_info(m),
+            "target temp": self.get_temp(self.target),
+            "room temp": self.get_temp(self.room)
         }
     end
 end
@@ -413,6 +484,18 @@ class zones: list
     def get_mode(z, p)
         return self[z].get_mode(p)
     end
+    # Gets zone.room or zone.target temp
+    def get_temp(z, field)
+        return self[z].get_temp(field)
+    end
+    # Sets zone.room or zone.target temp
+    def set_temp(z, field, temp)
+        return self[z].set_temp(field, temp)
+    end
+    # Set relay state based on temp
+    def set_relay(z)
+        self[z].set_relay(z)
+    end
     # Set the mode for a given zone
     def set_mode(z, m)
         var current = self.get_mode(z)
@@ -449,7 +532,8 @@ class zones: list
         var m = self.get_mode(z)
         var p = self.get_power(z, m)
         var e = self.get_expiry(z)
-        return status(z, m, p, e)
+        var t = self.get_temp(z, zone.target)
+        return status(z, m, p, e, t)
     end
     def tojson()
         var l = []
@@ -470,10 +554,10 @@ end
 # schedule['d'] = Days (Sun = 1 << 0, Mon = 1 << 1 etc)
 # schedule['z'] = Zones (ZN1 = 1 << 0, ZN2 = 1 << 1 etd)
 class schedule: map
-    static on = '1', off = '0', id = 'i', days = 'd', zones = 'z'
+    static on = '1', off = '0', id = 'i', days = 'd', zones = 'z', target = 't'
     def init(m)
         super(self).init()
-        m = isinstance(m, map) ? m : {"i":0, "1":0, "0":0, "d":0, "z":0}
+        m = isinstance(m, map) ? m : {"i":0, "1":0, "0":0, "d":127, "z":0}
         for k: m.keys()
             self[k] = m[k]
         end
@@ -481,33 +565,45 @@ class schedule: map
     # validates if a json payload is in the following format:
     # {"on": "07:00", "off": "12:59", "id":3, "days": [0,1,1,1,1,1,0], "zones":[1,1,0]}
     # If validation successful returns a schedule instance else raises an assert_failed error 
-    static def fromjson(m)
-        var sched = schedule()
-        var msg = / s -> string.format("Error: %s missing or invalid", s)
-        for k:  ["on", "off", "id", "days", "zones"]
-            var key = util.find_key_i(m, k)
-            assert(key, msg(k))
-            if k == 'on' || k == 'off'
-                var t = api.strptime(m[key], '%H:%M')
-                assert(t && t['hour']<24 && t['min']<60, msg(k))
-                sched[k == 'on' ? schedule.on : schedule.off] = t['hour']*3600+t['min']*60
-            elif k == 'id'
-                assert(type(m[key]) == 'int', msg(k))
-                sched[schedule.id] = m[key]
-            elif k == 'days' || k == 'zones'
-                assert(classname(m[key]) == 'list', msg(k))
-                var l = k == 'days' ? 7 : api.settings.zones.size()
-                assert(size(m[key]) == l, msg(k))
+    static def fromjson(m, action)
+         # Fill a default schedule with all days, and zones selected for a new schedule
+        var sum = (1 << api.settings.zones.size())-1
+        var sched = action == 'update' ? {} : schedule({"i":0, "1":0, "0":1, "d":127, "z": sum})
+        var msg = / k, s -> string.format("Error: %s key %s", k, s ? s : "invalid")
+        for k: m.keys()
+            var key = string.tolower(k)
+            if key == 'on' || k == 'off'
+                var t = api.strptime(m[k], '%H:%M')
+                assert(t && t['hour']<24 && t['min']<60, msg(k, "must be hh:mm format"))
+                sched[key == 'on' ? schedule.on : schedule.off] = t['hour']*3600+t['min']*60
+            elif key == 'id'
+                assert(type(m[k]) == 'int', msg(k))
+                sched[schedule.id] = m[k]
+            elif key == 'days' || k == 'zones'
+                assert(classname(m[k]) == 'list', msg(k, "must be a list"))
+                var l = key == 'days' ? 7 : api.settings.zones.size()
+                assert(size(m[k]) == l, msg(k, "has incorrectly sized list"))
                 var x = 0
-                for lk: m[key].keys()
-                    var v = m[key][lk]
-                    assert(v == 0 || v == 1, msg(k))
+                for lk: m[k].keys()
+                    var v = m[k][lk]
+                    assert(v == 0 || v == 1, msg(k, "must have list items of 1 or 0"))
                     if v x+= (1 << lk) end
                 end
-                sched[k == 'days' ? schedule.days : schedule.zones] = x
+                assert(x > 0, msg(k, "must contain at leat one " .. k[0..-2]))
+                sched[key == 'days' ? schedule.days : schedule.zones] = x
+            elif key == 'target'
+                if m[k] != nil
+                    assert(type(m[k]) == "int" || type(m[k]) == "real", msg("target"))
+                end
+                sched[schedule.target] = m[k]
             end
         end
-        assert(sched[schedule.off] > sched[schedule.on], msg("on/off times"))
+        var x = sched.contains(schedule.on)
+        var y = sched.contains(schedule.off)
+        assert( !((x || y) && (!x || !y)), msg('on and off', "are both required"))
+        if x && y
+            assert(sched[schedule.off] > sched[schedule.on], msg("off", "must be later than on key"))
+        end
         return sched
     end
     # true if index i of list k (days/zones) is set
@@ -516,6 +612,15 @@ class schedule: map
     end
     def set_zone(zone)
         self[self.zones] += (1 << zone)
+    end
+    def get_target_temp()
+        return self.find(self.target)
+    end
+    def set_target_temp(temp)
+        if self.get_target_temp() != temp
+            self[self.target] = temp
+            return true
+        end
     end
     def remove_zone(zone)
         var mask = -1 << zone
@@ -556,6 +661,7 @@ class schedule: map
         return l
     end
     # Calculates the next on/off run time in seconds
+    # Runat times will ALWAYS be 'on the minute'
     def get_runat(_t)
         if !self[self.days] return 0 end
         var t = self[_t] # _t is '1' (on) or '0' (off)
@@ -568,7 +674,9 @@ class schedule: map
             i += 1
             day = api.tomorrow(day)            
         end
-        return ( i ? 86400*i-(sfm-t) : t-sfm) + now['local']
+        var runat = ( i ? 86400*i-(sfm-t) : t-sfm) + now['local']
+        # Ensure that runat time is 'on the minute' exactly
+        return time.round(runat, 60)
     end
     # Calculates if the current schedule is on or off
     def is_running(zone)
@@ -580,14 +688,14 @@ class schedule: map
             end
             if self[self.on] <= sfm && sfm < self[self.off]
                 return true
-            end            
+            end         
         end
         return false
     end
     # Does this instance of schedule = another instance?
     def == (o)
-        for k: self.keys()
-            if self[k] != o[k]
+        for k: o.keys()
+            if o[k] != self[k]
                 return false
             end
         end
@@ -602,7 +710,8 @@ class schedule: map
             "off": self.secs2str(self[self.off]),
             "id": self[self.id],
             "days": self.days2list(),
-            "zones": self.zones2list()
+            "zones": self.zones2list(),
+            "target temp": self.find(self.target)
         }
     end
 end
@@ -613,13 +722,15 @@ class schedules : list
         super(self).init()
         if isinstance(l, list)
             for s: l
-                self.push(schedule(s))
+                self.push(schedule(s), true)
             end
         end
     end
     # list.push overridden to take a schedule
-    def push(schedule)
-        schedule[schedule.id] = self.next_id()
+    def push(schedule, assignid)
+        if assignid
+            schedule[schedule.id] = self.next_id()
+        end
         super(self).push(schedule)
         return true
     end
@@ -646,6 +757,20 @@ class schedules : list
             end
         end
     end
+    # Gets schedule.target temp for schedule
+    def get_target_temp(id)
+        var sched = self.get(id)
+        if sched
+            return sched.get_target_temp()
+        end
+    end
+    # Sets schedule.target_temp temp
+    def set_target_temp(id, temp)
+        var sched = self.get(id)
+        if sched
+            return sched.set_target_temp(temp)
+        end
+    end
     # Set a zone for each schedule
     def set_zone(zone)
         for s: self s.set_zone(zone) end
@@ -654,14 +779,14 @@ class schedules : list
     def remove_zone(zone)
         for s: self s.remove_zone(zone) end
     end
-    # Updates a schedule using schedule param
+    # Updates all or sub-set of schedule fields 
     def update(updated)
-        var current = self.get(updated[updated.id])
+        var current = self.get(updated[schedule.id])
         if current
             if current == updated
                 return false
             else 
-                for k: current.keys()
+                for k: updated.keys()
                      current[k] = updated[k]
                 end
                 return true
@@ -679,13 +804,14 @@ class schedules : list
                 var p = s.is_running(zone)
                 var r = s.get_runat(p ? s.off : s.on)
                 if p 
-                    return status(zone, 0, true, r)
+                    var t = s.get_target_temp()
+                    return status(zone, 0, true, r, t)
                 else 
                     i = r < i ? r : i 
                 end
             end
         end
-        return status(zone, 0, false, i)
+        return status(zone, 0, false, i, nil)
     end
     # Gets the schedule with the earliest on time for day
     def get_first_on(zone, day)
@@ -736,8 +862,8 @@ class schedules : list
     end
     def tojson()
         var l = []
-        for k: self
-            l.push(k.tojson())
+        for sched: self
+            l.push(sched.tojson())
         end
         return l
     end
@@ -899,7 +1025,7 @@ class scheduler
         end
         var millis = / now -> 60000-now['sec']*1000
         var callback = / formatter, local -> self.on_tick(formatter, local)
-        util.set_timer(millis, callback, 'scheduler', true)
+        time.set_timer(millis, callback, 'scheduler', true)
         self.on_start()
     end
     def stop()
@@ -925,12 +1051,16 @@ class scheduler
         end
     end
     def on_tick(formatter, local)
+        # Ensure time is exactly 'on the minute'
+        local = time.round(local, 60)
         var i = 0
         while i < size(self.schedules)
             if self.schedules[i]['runat'] <= local
                 var id = self.schedules[i]['id']
+                # Running always altenates between on and off
+                var running = !self.schedules[i]['running']
                 self.schedules.remove(i)
-                self.on_pop(api.settings.schedules.get(id))
+                self.on_pop(api.settings.schedules.get(id), running)
             else
                 i+=1
             end
@@ -938,17 +1068,38 @@ class scheduler
     end
     def run_schedule(s)
         # Is the schedule switching on or off?
-        var power = s.is_running()
+        var running = s.is_running()
         # Get the next run time depending on power state
-        var runat = s.get_runat(power ? s.off : s.on)
+        var runat = s.get_runat(running ? s.off : s.on)
         # Call on_pop when the timer expires
-        self.schedules.push({"id": s[schedule.id], "runat": runat})
+        self.schedules.push({"id": s[schedule.id], "running": running, "runat": runat})
+    end
+    def get_running_schedules()
+        var rsl =  schedules()
+        for rs: self.schedules
+            if rs['running']
+                rsl.push(api.settings.schedules.get(rs['id']))
+            end
+        end
+        return rsl
+    end
+    def get_running_schedule(zone_idx)
+        # Only return a running schedule if zone mode is auto (0)
+        if api.settings.zones[zone_idx].get_mode() return end
+        for s: self.get_running_schedules()
+            if s.is_set(schedule.zones, zone_idx)
+                return s
+            end
+        end
     end
     # Called when a schedule on or off time expires/completes
-    def on_pop(s)
+    def on_pop(s, running)
         if !self.running return end
         # Get the power state for the schedule
         var power = s.is_running()
+        if power != running
+            api.log("warning: is_running():" .. power .. "!=on_pop(running):" .. running)
+        end
         # Check each zone for the schedule
         var zone = 0
         while zone < size(api.settings.zones)
@@ -965,15 +1116,15 @@ class scheduler
                 # If previous mode was Day switch back to Day mode, else Auto
                 var previous = api.settings.zones.get_mode(zone, true) == 5 ? 5 : 0
                 # Update zone configuration state
-                api.settings.zones.set_zone(zone, previous, power)
+                api.settings.zones.set_zone(zone, previous, running)
                 self.on_completed(zone)
             elif mode == 5 # Daytime
                 # If schedule matches first on/last off, update power, expriry etc
-                if util.override.check_day(zone, s, power) 
+                if util.override.check_day(zone, s, running) 
                     self.on_completed(zone)
                 end
                 # Update schedule power
-                api.settings.zones.set_power(zone, power)
+                api.settings.zones.set_power(zone, running)
             end
             zone += 1
         end
@@ -986,8 +1137,6 @@ class scheduler
         var stat = util.config.get_next_status(zone)
         # Update the power and expiry/next run time for the zone
         api.settings.zones.set_zone(zone, stat.mode, stat.power, stat.expiry)
-        # Set the power state of the relay
-        api.set_power(zone, stat.power)
         # Update logs, LED, MQTT and screen
         stat.notify()
     end
@@ -1007,7 +1156,6 @@ class override
         ]
         self.check_boost(zone, mode)
         director[mode](self, zone, duration)
-        self.on_completed(zone)
     end
     # Before the mode is changed, check if we need to cancel a running boost
     def check_boost(zone, mode)
@@ -1017,9 +1165,12 @@ class override
         end
     end
     # Set the relay power state and log/display message for zone
-    def on_completed(zone)
+    def on_completed(zone, target_temp)
         var stat = api.settings.zones.get_status(zone)
-        api.set_power(zone, stat.power)
+        # Day mode pass a target_temp param
+        if target_temp 
+            stat.target = target_temp 
+        end
         # Update logs, LED, MQTT and screen
         stat.notify()
         # Force the updated configuration to be saved to flash
@@ -1030,9 +1181,10 @@ class override
         var id = 'boost' .. zone
         var callback = / -> self.on_boost_end(zone)
         var millis = / -> !secs ? 3600000 : secs * 1000
-        util.set_timer(millis, callback, id, false)
+        time.set_timer(millis, callback, id, false)
         var expiry = (!secs ? 3600 : secs) + api.rtc()['local']
         api.settings.zones.set_zone(zone, 1, true, expiry)
+        self.on_completed(zone)
     end
     # Called by boost handler when timer completes
     def on_boost_end(zone)
@@ -1054,19 +1206,23 @@ class override
     def advance(zone)
         var stat = api.settings.schedules.get_next_status(zone)
         api.settings.zones.set_zone(zone, 4, !stat.power, stat.expiry)
+        self.on_completed(zone)
     end
-    # Swtich zone to timer mode
+    # Swtich zone to timer mode. Let scheduler handle on_completed()
     def auto(zone)
-        var stat = api.settings.schedules.get_next_status(zone)
-        api.settings.zones.set_zone(zone, 0, stat.power, stat.expiry)
+        api.settings.zones.set_mode(zone, 0)
+        util.scheduler.on_completed(zone)
+        util.config.save()
     end
     # Switch zone permanently on
     def on(zone)
         api.settings.zones.set_zone(zone, 2, true)
+        self.on_completed(zone)
     end
     # Switch zone permanently off
     def off(zone)
         api.settings.zones.set_zone(zone, 3, false)
+        self.on_completed(zone)
     end
     # Switch zone on from first 'ON' time until last 'OFF' time 
     def day(zone, _dt)
@@ -1080,14 +1236,22 @@ class override
         var on = start.get_runat(start.on)
         var off = finish.get_runat(finish.off)
         var power = (on > off || on <= n['local']) && n['local'] <= off
-        var expiry
-        if power expiry = off
-        elif n['sfm'] < start[start.on] expiry = on
-        elif n['sfm'] > finish[finish.off]
+        var expiry, target_temp
+        if power 
+            expiry = off
+            target_temp = finish.get_target_temp()
+        elif n['sfm'] < start[start.on] 
+            expiry = on
+            target_temp = start.get_target_temp()
+        elif n['sfm'] >= finish[finish.off]
             var nfo = api.settings.schedules.get_next_first_on(zone, n['weekday'])
             expiry = nfo.get_runat(nfo.on)
+            target_temp = nfo.get_target_temp()
         end
         api.settings.zones.set_zone(zone, 5, power, expiry)
+        if !_dt
+            self.on_completed(zone, target_temp)
+        end
     end
     # Used by scheduler to test if schedule matches day first on or last off time
     def check_day(zone, s, power)
@@ -1113,10 +1277,33 @@ class override
         end
     end
     # Set the mode for a given zone per flow control map
-    def toggle_mode(zone, flow)
+    def exec_flow(zone, flow)
         var mode = api.settings.zones.get_mode(zone)
         if !flow.has(mode) return end
         self.set(zone, flow[mode])
+    end
+    def toggle_zone(zone, to_power)
+        to_power = int(to_power)
+        var mode = api.settings.zones.get_mode(zone)
+        var from_power = api.settings.zones.get_power(zone, mode)
+        # XOR returns true if power needs toggling
+        if (to_power == 1 || to_power == 0) && (from_power ? !to_power : to_power)
+            # Toggle Advance/Auto
+            if mode == 0 || mode == 4
+                self.exec_flow(zone, {0:4,4:0})
+            # Toggle Const On/Off
+            elif mode == 2 || mode == 3
+                self.exec_flow(zone, {2:3,3:2})
+            # Toggle Boost or Day 
+            elif mode == 1 || mode == 5
+                # Switch to Advance mode if Auto doesn't toggle power
+                if (int(api.settings.zones.get_power(zone)) ^ to_power)
+                    self.set(zone, 4)
+                else
+                    self.set(zone, 0)
+                end
+            end
+        end
     end
 end
 
@@ -1139,14 +1326,49 @@ class driver
     end
 end
 
-class component
+class alexa
+    static callback = / z, p -> util.override.toggle_zone(z, p)
+    def init(zones)
+        import hue_bridge
+        for z: 1 .. size(zones)
+            self.add_device(z, zones[z-1][zone.label])
+        end
+    end
+    # Alexa device id must be > 0 (zone idx+1)
+    def add_device(id, label)
+        var d = self.device()
+        hue_bridge.add_light(id, d, label)
+    end
+    # Remove Alexa device by Alexa device id (zone idx-1)
+    def remove_device(id)
+        hue_bridge.remove_light(id)
+    end
+    def device()
+        class heating_state: light_state
+            def init(id)
+                super(self).init(light_state.RELAY)
+            end
+            def signal_change()
+                var zone = hue_bridge.light_to_id(self) - 1
+                alexa.callback(zone, self.power)
+            end
+        end
+        return heating_state()
+    end
+    def set_power(zone, power)
+        hue_bridge.lights[zone+1]['light'].set_power(power)
+    end
+end
+
+class buttons
+    static fmt = 'Button%d#Action'
     def init()
         self.add_triggers()
     end
     def add_trigger(zone)
         # Run deferred as nested rules are blocked...
         api.add_rule(
-            string.format(self.fmt(), zone+1), 
+            string.format(self.fmt, zone+1), 
             / v, t -> api.set_timer(0, / -> self.on_changed(v, t))
         )
     end
@@ -1157,57 +1379,18 @@ class component
     end
     def pop_trigger()
         api.remove_rule(
-            string.format(self.fmt(), api.settings.zones.size())
+            string.format(self.fmt, api.settings.zones.size())
         )
     end
-end
-
-class buttons: component
-    def init(comp) super(self).init() end
-    def fmt() return 'Button%d#Action' end
     # Handler for physical buttons
     def on_changed(v, t)
         var zone = int(t[6])-1
         if v == 'SINGLE'
-            util.override.toggle_mode(zone, {0:4,4:0})
+            util.override.exec_flow(zone, {0:4,4:0})
         elif v == 'DOUBLE'
-            util.override.toggle_mode(zone, {0:5,5:2,2:3,3:0})
+            util.override.exec_flow(zone, {0:5,5:2,2:3,3:0})
         elif v == 'TRIPLE'
-            util.override.toggle_mode(zone, {0:1,1:0})
-        end
-    end
-end
-
-class relays: component
-    def init() super(self).init() end
-    def fmt() return 'POWER%d#State' end
-    # Check webbutton power toggle syncs with heating controller state
-    def on_changed(v, t)
-        var zone = int(string.split(t, '#')[0][5..])-1
-        var mode = api.settings.zones.get_mode(zone)
-        self.set_power(zone, mode, v)
-    end
-    # Change the power state of the zone if different from current state
-    def set_power(zone, mode, payload)
-        var from_power = api.settings.zones.get_power(zone, mode)
-        var to_power = int(payload)
-        # XOR returns true if power needs toggling
-        if (to_power == 1 || to_power == 0) && (from_power ? !to_power : to_power)
-            # Toggle Advance/Auto
-            if mode == 0 || mode == 4
-                util.override.toggle_mode(zone, {0:4,4:0})
-            # Toggle Const On/Off
-            elif mode == 2 || mode == 3
-                util.override.toggle_mode(zone, {2:3,3:2})
-            # Toggle Boost or Day 
-            elif mode == 1 || mode == 5
-                # Switch to Advance mode if Auto doesn't toggle power
-                if (int(api.settings.zones.get_power(zone)) ^ to_power)
-                    util.override.set(zone, 4)
-                else
-                    util.override.set(zone, 0)
-                end
-            end
+            util.override.exec_flow(zone, {0:1,1:0})
         end
     end
 end
@@ -1226,6 +1409,14 @@ class command
     end
 end
 
+class running_command: command
+    static cmd = "RunningSchedules"
+    def init() super(self).init() end
+    def on_cmd(cmd, idx, payload, payload_json)
+        var j = util.scheduler.get_running_schedules().tojson()
+        api.resp_cmnd(json.dump({self.cmd: j}))
+    end
+end
 class modes_command: command
     static cmd = "HeatingModes"
     def init() super(self).init() end
@@ -1329,7 +1520,7 @@ class zone_command: command
                 var key = util.find_key_i(payload_json, k)
                 if key && isinstance(payload_json[key], map)
                     var z
-                    try z = zone.fromjson(payload_json[key])
+                    try z = zone.fromjson(payload_json[key], k)
                     except 'assert_failed' as e, m
                         self.resp_cmnd(idx+1, m)
                         return
@@ -1344,8 +1535,15 @@ class zone_command: command
                     break
                 end
             end
-        elif payload == string.tolower("delete")
+        elif string.tolower(payload) == "delete"
             self.delete(idx)
+        elif string.tolower(payload) == "runningschedule"
+            var jz = api.settings.zones[idx].tojson()
+            jz['id'] = idx+1
+            var js = util.scheduler.get_running_schedule(idx)
+            if js js = js.tojson() end
+            api.resp_cmnd(json.dump({self.cmd: jz, "RunningSchedule": js}))
+            return
         elif payload == ''
             var zone = api.settings.zones[idx].tojson()
             zone['id'] = idx+1
@@ -1354,7 +1552,7 @@ class zone_command: command
         else
             var power = util.cmd_params.find(string.tolower(payload))
             if power != nil 
-                self.set_power(idx, power) 
+                util.override.toggle_zone(idx, power)
             end
         end
         self.resp_cmnd(idx+1)
@@ -1365,13 +1563,22 @@ class zone_command: command
         if !size(payload[zone.label])
             payload[zone.label] = 'ZN' .. idx+1
         end
+        if payload.contains('target') && payload['target'] == nil
+            payload.remove('target')
+        end
+        if payload.contains('room') && payload['room'] == nil
+            payload.remove('room')
+        end
         # Add the new zone to the zones collection
         api.settings.zones.push(zone(payload))
         # Add the new zone to schedules
         api.settings.schedules.set_zone(idx)
-        # Sync button and relay triggers
+        # Add a new Alexa device
+        if util.alexa
+            util.alexa.add_device(idx+1, payload[zone.label])
+        end
+        # Sync button triggers
         util.buttons.add_trigger(idx)
-        util.relays.add_trigger(idx)
         # Sync the Tasmota UI Toggle buttons
         if util.config.is_option_set(util.options['SYNC'])
             util.config.set_webbutton(idx+1, payload[zone.label])
@@ -1386,13 +1593,26 @@ class zone_command: command
         util.config.save()
     end
     def update(idx, payload)
-        # Process label
+        # Process temperatures
+        def set_temp(t, f)
+            return api.settings.zones[idx].set_temp(f, t)
+        end
+        var target = set_temp(payload.find(zone.target), zone.target)
+        var room = set_temp(payload.find(zone.room), zone.room)
+        if target || room
+            api.settings.zones[idx].set_relay(idx)
+        end
         var _dirty = false
+        # Process label
         var label = payload.find(zone.label)
         if label
             # Only update the label if it has changed
             if size(label) > 0 && label != api.settings.zones.get_label(idx)
                 api.settings.zones.set_label(idx, label)
+                # Update Alexa device name (needs Alexa app rediscoery)
+                if util.alexa
+                    util.alexa.add_device(idx+1, label)
+                end
                 _dirty = true
                     # Sync the Tasmota UI Toggle buttons
                 if util.config.is_option_set(util.options['SYNC'])
@@ -1421,24 +1641,31 @@ class zone_command: command
         if api.settings.zones.get_mode(idx) == 1
             util.override.on_boost_cancel(idx)
         end
-        # Remove last button and relay triggers
+        # Remove last button triggers
         util.buttons.pop_trigger()
-        util.relays.pop_trigger()
         # Clear display zone info BEFORE delete
         if util.config.is_option_set(util.options['DISPLAY'])
             for z: 1 .. size(api.settings.zones)
                 disp.publish({"ClearZone": z})
             end
         end
+        # Clear Alexa devices
+        if util.alexa
+            for id: 1 .. api.settings.zones.size()
+                util.alexa.remove_device(id)
+            end
+        end
         # Remove zone from zone collection
         api.settings.zones.pop(idx)
         # Remove zone from schedules
         api.settings.schedules.remove_zone(idx)
+        # Re-create Alexa devices. Will still need Alexa app cleanup
+        if util.alexa
+            util.alexa = alexa(api.settings.zones)
+        end
         # Re-sync power state for reshuffled zones
-        for z: api.settings.zones.keys()
+        for z: 0 .. api.settings.zones.size()-1
             var stat = api.settings.zones.get_status(z)
-            # Set the power state of the relay
-            api.set_power(z, stat.power)
             # Notify display etc.
             stat.notify()
         end
@@ -1456,29 +1683,6 @@ class zone_command: command
             util.override.set(idx, to_mode, payload[zone.expiry])
         else
             util.override.set(idx, to_mode)
-        end
-    end
-    # Change the power state of the zone if different from current state
-    def set_power(idx, to_power)
-        var mode = self.get_mode(idx)
-        var from_power = api.settings.zones.get_power(idx, mode)
-        # XOR returns true if power needs toggling
-        if from_power ? !to_power : to_power
-            # Toggle Advance/Auto
-            if mode == 0 || mode == 4
-                util.override.toggle_mode(idx, {0:4,4:0})
-            # Toggle Const On/Off
-            elif mode == 2 || mode == 3
-                util.override.toggle_mode(idx, {2:3,3:2})
-            # Toggle Boost or Day 
-            elif mode == 1 || mode == 5
-                # Switch to Advance mode if Auto doesn't toggle power
-                if api.settings.zones.get_power(idx) ? !to_power : to_power
-                    util.override.set(idx, 4)
-                else
-                    util.override.set(idx, 0)
-                end
-            end
         end
     end
 end
@@ -1510,7 +1714,7 @@ class schedule_command: command
                 var key = util.find_key_i(payload_json, k)
                 if key && isinstance(payload_json[key], map)
                     payload_json[key].setitem('id', idx)
-                    try payload_json = schedule.fromjson(payload_json[key])
+                    try payload_json = schedule.fromjson(payload_json[key], k)
                     except 'assert_failed' as e, m
                         self.resp_cmnd(idx, m)
                         return
@@ -1525,7 +1729,7 @@ class schedule_command: command
                     break
                 end
             end
-        elif payload == string.tolower("delete") && idx > 0
+        elif string.tolower(payload) == "delete" && idx > 0
             self.delete(idx)
         elif payload == ''
             var json = json.dump({self.cmd: api.settings.schedules.get(idx).tojson()})
@@ -1535,10 +1739,33 @@ class schedule_command: command
         self.resp_cmnd(idx)
     end
     def new(payload)
-        if api.settings.schedules.push(payload) util.restart() end
+        if payload.contains('target') && payload['target'] == nil
+            payload.remove('target')
+        end
+        if api.settings.schedules.push(payload, true) util.restart() end
     end
     def update(payload)
-        if api.settings.schedules.update(payload) util.restart() end
+        # Handle updated target temp for schedule
+        var target = payload.find(zone.target)
+        if target
+            var id = payload[schedule.id]
+            if api.settings.schedules.set_target_temp(id, target)
+                # If schedule currently running force a relay upate
+                var rs = util.scheduler.get_running_schedules()
+                for s: rs
+                    if s[schedule.id] == id
+                        for z: api.settings.zones.keys()
+                            if s.is_set(schedule.zones, z)
+                                api.settings.zones[z].set_target_temp(target)
+                                api.settings.zones[z].set_relay(z)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        # If there are other fields, update schedule as normal
+        if api.settings.schedules.update(payload) util.restart() end    
     end
     def delete(idx)
         if api.settings.schedules.pop(idx) util.restart() end
@@ -1556,15 +1783,6 @@ class HeatingController
         util.config = config()
         # Load persisted zones, schedules and options
         util.config.load()
-        # Register commands
-        zone_command()
-        zones_command()
-        schedule_command()
-        schedules_command()
-        options_command()
-        modes_command()
-        days_command()
-        labels_command()
         # Restore configuration options
         util.config.configure_options()
         # Create the override capability
@@ -1575,6 +1793,16 @@ class HeatingController
         util.driver = driver()
         # Register the tasmota driver
         api.add_driver(util.driver)
+        # Register commands
+        running_command()
+        zone_command()
+        zones_command()
+        schedule_command()
+        schedules_command()
+        options_command()
+        modes_command()
+        days_command()
+        labels_command()
         # Fires when RTC has initialized (deferred)
         api.add_rule('Time#Initialized', /-> 
             api.set_timer(0, /-> self.time_initialized())
@@ -1594,8 +1822,10 @@ class HeatingController
         disp.publish("SYN")
         # Register button press triggers
         util.buttons = buttons()
-        # Register power state change triggers
-        util.relays = relays()
+        # If Alexa emulation enabled configure Alexa devices
+        if api.cmd("Emulation")['Emulation'] == 2
+            util.alexa = alexa(api.settings.zones)
+        end
     end
     # Called once the RTC is initialized (Time#Initialized)
     def time_initialized()

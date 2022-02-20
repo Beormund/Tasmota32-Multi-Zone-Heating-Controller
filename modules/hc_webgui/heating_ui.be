@@ -41,7 +41,7 @@ class schedule_ui
         var action = s ? 'update' : 'new'
         var _zones = []
         for i: 1 .. size(labels) _zones.push(0) end
-        s = s ? s : {"on": "00:00", "off": "00:00", "days": [0,0,0,0,0,0,0], "zones": _zones}
+        s = s ? s : {"on": "00:00", "off": "00:00", "days": [0,0,0,0,0,0,0], "zones": _zones, "target temp": nil}
         webserver.content_send(string.format(html[0], id, id, s['on'], s['off']))
         for d: 0 .. size(days)-1
             var checked = s['days'][d] ? 'checked' : ''
@@ -54,11 +54,13 @@ class schedule_ui
             var zl = labels[z]
             webserver.content_send(string.format(html[3], zl, z, checked, zl, zl))
         end
-        webserver.content_send(string.format(html[4], action, id))
+        var target = s['target temp'] != nil ? s['target temp'] : ''
+        webserver.content_send(string.format(html[4], target))
+        webserver.content_send(string.format(html[5], action, id))
         if action == 'update'
-            webserver.content_send(html[5])
+            webserver.content_send(html[6])
         end
-        webserver.content_send(html[6])
+        webserver.content_send(html[7])
     end
 end
 
@@ -77,8 +79,9 @@ class zone_ui
     def show_editor(zid, html, z)
         var modes = tasmota.cmd('HeatingModes')['HeatingModes']
         var action = z != nil ? 'update' : 'new'
-        z = z ? z : {'label': 'ZN' .. zid, 'mode': 0}
-        webserver.content_send(string.format(html[0], zid, zid, z['label']))
+        z = z ? z : {'label': 'ZN' .. zid, 'mode': 0, 'target temp': nil}
+        var target = z['target temp'] != nil ? z['target temp'] : ''
+        webserver.content_send(string.format(html[0], zid, zid, z['label'], target))
         for k: 0 .. size(modes)-1
             var mode = modes[k]
             var checked = z['mode'] == k ? 'checked' : ''
@@ -127,6 +130,15 @@ class http_manager
             if zone['mode'] == 1 && webserver.has_arg('hours[]')
                 zone['hours'] = int(webserver.arg('hours[]'))
             end
+            # Process target temp
+            if webserver.has_arg('t')
+                var t = webserver.arg('t')
+                if t == ''
+                    zone['target'] = nil
+                elif number(t) != 0
+                    zone['target'] = number(t)
+                end
+            end
             if webserver.has_arg('new') 
                 tasmota.cmd(string.format("HeatingZone %s", json.dump({"new": zone})))
             else
@@ -157,6 +169,13 @@ class http_manager
                     s['on'] = value
                 elif name == 'off'
                     s['off'] = value
+                elif name == 't'
+                    var t = webserver.arg('t')
+                    if t == ''
+                        s['target'] = nil
+                    elif number(t) != 0
+                        s['target'] = number(t)
+                    end
                 end 
             end
             return s         

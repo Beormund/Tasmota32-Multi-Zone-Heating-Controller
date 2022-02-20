@@ -330,7 +330,7 @@ class clock
     end
  end
 
-class screen
+class dotmatrixscreen
     var lcd
     def init()
         self.lcd = lcd_i2c()
@@ -349,6 +349,7 @@ class screen
         tasmota.add_rule("HeatingDisplay#ClearZone", /z-> self.clear_zone(z))
     end
     def stop()
+        print("screen.stop() called")
         self.lcd.clear()
         tasmota.remove_rule("HeatingDisplay#HeatingZone")
         tasmota.remove_rule("HeatingDisplay#ClearZone")
@@ -391,11 +392,14 @@ end
 
 def start()
     if _display return end
-    _display = screen()
+    _display = dotmatrixscreen()
     _display.start()
 end
 def stop()
-    if !_display return end
+    print(classname(_display))
+    if classname(_display) != 'dotmatrixscreen' 
+        return
+    end
     _display.stop()
     _display = nil
 end
