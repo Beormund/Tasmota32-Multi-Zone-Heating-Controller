@@ -349,7 +349,6 @@ class dotmatrixscreen
         tasmota.add_rule("HeatingDisplay#ClearZone", /z-> self.clear_zone(z))
     end
     def stop()
-        print("screen.stop() called")
         self.lcd.clear()
         tasmota.remove_rule("HeatingDisplay#HeatingZone")
         tasmota.remove_rule("HeatingDisplay#ClearZone")
