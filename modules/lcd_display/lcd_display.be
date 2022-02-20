@@ -322,11 +322,11 @@ class clock
                 end
                 clock.set_timer() 
             end, 
-            "hc_lvgl_timer"
+            "hc_lcd_timer"
         )
     end
     static def stop()
-        tasmota.remove_timer("hc_lvgl_timer")
+        tasmota.remove_timer("hc_lcd_timer")
     end
  end
 
@@ -384,24 +384,21 @@ class dotmatrixscreen
 end
 
 # Hold a reference to screen instance
-var _display = nil 
+lcd_display._display = nil
 
 def ack()
     tasmota.publish_result('{"HeatingDisplay":"ACK"}', 'RESULT')
 end
 
 def start()
-    if _display return end
-    _display = dotmatrixscreen()
-    _display.start()
+    if lcd_display._display return end
+    lcd_display._display = dotmatrixscreen()
+    lcd_display._display.start()
 end
 def stop()
-    print(classname(_display))
-    if classname(_display) != 'dotmatrixscreen' 
-        return
-    end
-    _display.stop()
-    _display = nil
+    if !lcd_display._display return end
+    lcd_display._display.stop()
+    lcd_display._display = nil
 end
 
 # Subscibe to Tasmota events

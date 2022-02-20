@@ -320,21 +320,21 @@ class touchscreen
     end
 end
 
-var _display = nil 
+lvgl_display._display = nil 
 
 def ack()
     tasmota.publish_result('{"HeatingDisplay":"ACK"}', 'RESULT')
 end
 
 def start()
-    if _display return end
-    _display = touchscreen()
-    _display.start()
+    if lvgl_display._display return end
+    lvgl_display._display = touchscreen()
+    lvgl_display._display.start()
 end
 def stop()
-    if !_display return end
-    _display.stop()
-    _display = nil
+    if !lvgl_display._display return end
+    lvgl_display._display.stop()
+    lvgl_display._display = nil
 end
 
 # Subscibe to Tasmota events
