@@ -54,7 +54,7 @@ This heating controller was tested with Tasmota32.bin and Tasmota32-lvgl.bin (fo
 
 Using the Tasmota web UI, navigate to **Configuration | Configure Other**. Paste the following json template into the Template field. Tick "Activate" checkbox and "Save". You may need to adjust the template to match the number of components you have attached, and whether you are using I2C or SPI screen etc.
 
-```json
+```yaml
 {"NAME":"Tasmota ESP32","GPIO":[1,1,1,1,1,1,1,1,1,1377,1,1,1,1,1,0,0,640,608,224,0,225,226,32,0,0,0,0,33,34,1,1,1,0,0,1],"FLAG":0,"BASE":1}
 ```
 
@@ -187,7 +187,7 @@ Command|Parameters
 
 ### MQTT Publications:
 
-```json
+```yaml
 21:12:18.608 CMD: HeatingZones
 21:12:18.645 MQT: tasmota/stat/RESULT = {"HeatingZones":[{"id":1,"target temp":22,"mode":0,"power":true,"room temp":21,"label":"HTG1","expiry":1645398000,"info":"HTG1 Auto On until 23:00 Sun 20 Feb 22"},{"id":2,"target temp":23.4,"mode":5,"power":true,"room temp":21,"label":"HTG2","expiry":1645398000,"info":"HTG2 Day On until 23:00 Sun 20 Feb 22"},{"id":3,"target temp":null,"mode":0,"power":true,"room temp":null,"label":"HWTR","expiry":1645398000,"info":"HWTR Auto On until 23:00 Sun 20 Feb 22"}]}
 
