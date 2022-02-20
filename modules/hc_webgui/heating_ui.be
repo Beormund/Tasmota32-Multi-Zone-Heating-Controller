@@ -42,25 +42,27 @@ class schedule_ui
         var _zones = []
         for i: 1 .. size(labels) _zones.push(0) end
         s = s ? s : {"on": "00:00", "off": "00:00", "days": [0,0,0,0,0,0,0], "zones": _zones, "target temp": nil}
-        webserver.content_send(string.format(html[0], id, id, s['on'], s['off']))
+        webserver.content_send(html[0])
+        webserver.content_send(string.format(html[1], id))
+        var target = s['target temp'] != nil ? s['target temp'] : ''
+        webserver.content_send(string.format(html[2], id, s['on'], s['off'], target))
+        webserver.content_send(html[3])
         for d: 0 .. size(days)-1
             var checked = s['days'][d] ? 'checked' : ''
             var dl = days[d]
-            webserver.content_send(string.format(html[1], dl, d, checked, dl, dl))
+            webserver.content_send(string.format(html[4], dl, d, checked, dl, dl))
         end
-        webserver.content_send(html[2])
+        webserver.content_send(html[5])
         for z: 0 .. size(labels)-1
             var checked = s['zones'][z] ? 'checked' : ''
             var zl = labels[z]
-            webserver.content_send(string.format(html[3], zl, z, checked, zl, zl))
+            webserver.content_send(string.format(html[6], zl, z, checked, zl, zl))
         end
-        var target = s['target temp'] != nil ? s['target temp'] : ''
-        webserver.content_send(string.format(html[4], target))
-        webserver.content_send(string.format(html[5], action, id))
+        webserver.content_send(string.format(html[7], action, id))
         if action == 'update'
-            webserver.content_send(html[6])
+            webserver.content_send(html[8])
         end
-        webserver.content_send(html[7])
+        webserver.content_send(html[9])
     end
 end
 
@@ -81,18 +83,20 @@ class zone_ui
         var action = z != nil ? 'update' : 'new'
         z = z ? z : {'label': 'ZN' .. zid, 'mode': 0, 'target temp': nil}
         var target = z['target temp'] != nil ? z['target temp'] : ''
-        webserver.content_send(string.format(html[0], zid, zid, z['label'], target))
+        webserver.content_send(html[0])
+        webserver.content_send(string.format(html[1], zid, zid))
+        webserver.content_send(string.format(html[2], z['label'], target))
         for k: 0 .. size(modes)-1
             var mode = modes[k]
             var checked = z['mode'] == k ? 'checked' : ''
-            webserver.content_send(string.format(html[1], mode, k, checked, mode, mode))
+            webserver.content_send(string.format(html[3], mode, k, checked, mode, mode))
         end
-        webserver.content_send(html[2])
-        webserver.content_send(string.format(html[3], action))
+        webserver.content_send(html[4])
+        webserver.content_send(string.format(html[5], action))
         if action == 'update'
-            webserver.content_send(html[4])
+            webserver.content_send(html[6])
         end
-        webserver.content_send(html[5])
+        webserver.content_send(html[7])
     end
 end
 
