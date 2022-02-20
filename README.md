@@ -18,7 +18,7 @@ This heating controller gives independent time control over multiple channels or
 * The heating controller can be configured and controlled using custom commands (see below). The 'Configure Heating' UI is built entirely using these commands. It is therefore possible to build your own UI using these Tasmota commands.
 * If Alexa/Hue emulation is enabled, when the power state of the relay is changed via Alexa (or MQTT or by pressing the Tasmota web UI relay buttons) the relevant heating zone's status is synchronised.
 * Two types of display are supported: 1) A basic HD44780 20x4 I2C LCD, or 2) a 320x240/480x320 SPI ILI9341 or similar with XPT2046 touch controller. NB for the touch screen the latest pre-compiled tassmota32-lvgl.bin development firmware is required. Before installing the heating controller app the touch screen should be calibrated using the [calibration app](https://github.com/arendst/Tasmota/pull/14459). Both screens can display up to 3 zones. The display is not enabled by default so you will need to enable the option on the Configure Heating page.
-* The controller support thermostat input. If the option is enabled, a target temperature can be set for each zone. A target temperature can also be set for each schedule which overrides the zone's target temperature whilst the schedule is running (see below for further details).
+* The controller supports thermostat input. If the option is enabled, a target temperature can be set for each zone. A target temperature can also be set for each schedule which overrides the zone's target temperature whilst the schedule is running (see below for further details).
 
 ILI9341 / XP2046 Display (using Tasmota32-lvgl.bin firmware)
 
@@ -88,9 +88,9 @@ Disable useless internal chip temperature readings
 
 `SetSensor127 0`
 
-If you intend to use Alexa/Hue emulation, set friendly names for the relays:
+If you intend to use Alexa/Hue emulation the heating controller creates its own virtual Alexa devices with names taken from zone labels. It is therefore advisable to disable the default friendly names that Tasmota creates for relays by prepending $ signs to the names:
 
-`backlog FriendlyName1 Zone 1; FriendlyName2 Zone 2; FriendlyName3 Hot Water; FriendlyName4 $LED; Emulation 2`
+`backlog FriendlyName1 $r1; FriendlyName2 $r2; FriendlyName3 $r3; Emulation 2`
 
 If you live in a region with daylight saving you might want to specify a std/dst profile. Check out the Tasmota docs for Timezone, Timestd & Timedst. Here's an example profile for the UK:
 
