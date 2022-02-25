@@ -981,6 +981,11 @@ class config
             api.settings.options = 22 # UI/LED/MQTT enabled
         end
     end
+    def restart()
+        util.scheduler.stop()
+        util.scheduler.start()
+        self.refresh()
+    end
     # Refreshes zones on re/start or schedue/zone changes
     # Refreshes scheduler/override depending on mode of each zone
     def refresh()
@@ -1705,7 +1710,7 @@ class schedule_command: command
         if payload.contains(schedule.target) && payload[schedule.target] == nil
             payload.remove(schedule.target)
         end
-        if api.settings.schedules.push(payload, true) util.config.refresh() end
+        if api.settings.schedules.push(payload, true) util.config.restart() end
     end
     def update(payload)
         # Handle updated target temp for schedule
@@ -1728,10 +1733,10 @@ class schedule_command: command
             end
         end
         # If there are other fields, update schedule as normal
-        if api.settings.schedules.update(payload) util.config.refresh() end    
+        if api.settings.schedules.update(payload) util.config.restart() end    
     end
     def delete(idx)
-        if api.settings.schedules.pop(idx) util.config.refresh() end
+        if api.settings.schedules.pop(idx) util.config.restart() end
     end
 end
 
