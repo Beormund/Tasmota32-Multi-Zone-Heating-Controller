@@ -403,9 +403,9 @@ end
 # Subscibe to Tasmota events
 tasmota.add_rule("Time#Initialized", /-> clock.initialise())
 # Subscribe to events sent from Heating Controller
-tasmota.add_rule("HeatingDisplay==ON", /->tasmota.set_timer(0, /->start()))
-tasmota.add_rule("HeatingDisplay==OFF", /->tasmota.set_timer(0, /->stop()))
-tasmota.add_rule("HeatingDisplay==SYN", /->tasmota.set_timer(0, /->ack()))
+tasmota.add_rule("HeatingDisplay==ON", /->tasmota.set_timer(0, start))
+tasmota.add_rule("HeatingDisplay==OFF", /->tasmota.set_timer(0, stop))
+tasmota.add_rule("HeatingDisplay==SYN", /->tasmota.set_timer(0, ack))
 # Once lvgl_display loads an initialisation trigger is broadcast
 ack()
 

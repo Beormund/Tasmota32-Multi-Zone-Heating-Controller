@@ -16,7 +16,7 @@ This heating controller gives independent time control over multiple channels or
 * One physical push button per zone is supported with different actions available via single, double and triple press.
 * Each zone can be put into manual override. Several manual override modes are available (see Operating Modes below)
 * The heating controller can be configured and controlled using custom commands (see below). The 'Configure Heating' UI is built entirely using these commands. It is therefore possible to build your own UI using these Tasmota commands.
-* If Alexa/Hue emulation is enabled, when the power state of the relay is changed via Alexa (or MQTT or by pressing the Tasmota web UI relay buttons) the relevant heating zone's status is synchronised.
+* Alexa/Hue virtual device support (see Alexa Support below).
 * Two types of display are supported: 1) A basic HD44780 20x4 I2C LCD, or 2) a 320x240/480x320 SPI ILI9341 or similar with XPT2046 touch controller. NB for the touch screen the latest pre-compiled tassmota32-lvgl.bin development firmware is required. Before installing the heating controller app the touch screen should be calibrated using the [calibration app](https://github.com/arendst/Tasmota/pull/14459). Both screens can display up to 3 zones. The display is not enabled by default so you will need to enable the option on the Configure Heating page.
 * The controller supports thermostat input. If the option is enabled, a target temperature can be set for each zone. A target temperature can also be set for each schedule which overrides the zone's target temperature whilst the schedule is running (see below for further details).
 
@@ -139,11 +139,7 @@ If the thermostat (THERM) option is enabled:
 * If physical buttons are configured, each button can operate an associated zone as follows. SINGLE press: zone will toggle from Auto to Advance mode. Auto on switches to Advance off and Auto off switches to Advance on etc. DOUBLE press: Zone switches mode in the following order with each double press: Auto -> All Day -> Const On -> Const Off -> Auto. TRIPLE press: mode switches from Auto to Boost (1 hour), or if boost is activated, from Boost to Auto.
 * Ensure that schedule on/off times do not overlap as this may result in unexpected behaviour.
 * If there is a power cut or the microcontroller is restarted, zones will be restored to their last operating mode.
-* If you have an MQTT broker, the following is an example payload that the heating controller publishes when a zone changes state:
 
-```yaml
-17:00:01.609 MQT: wifi2mqtt/Heating-Controller/tele/RESULT = {"HeatingZone":{"id":1,"target temp":22,"mode":0,"power":true,"room temp":21,"label":"HTG1","expiry":1645398000,"info":"HTG1 Auto On until 23:00 Sun 20 Feb 22"}}
-```
 ## Thermostat Support
 
 If the thermostat (THERM) option is enabled target temperatures can be set in the web UI (or via Tasmota commands/MQTT) at the zone level and at the schedule level. Together with room temperature readings the relays are controlled by applying the following rules:
@@ -155,7 +151,7 @@ If the thermostat (THERM) option is enabled target temperatures can be set in th
 
 ## Alexa Support
 
-* If Hue emulation is enabled in the Tasmota UI an Alexa device will be created with the same name as the heating zone's label. Once enabled and the controller is restarted, ask Aslexa to "discover devices". 
+* If Hue emulation is enabled in the Tasmota UI an Alexa device will be created with the same name as the heating zone's label. Once enabled and the controller is restarted, ask Alexa to "discover devices". 
 * Note that Alexa will turn on/off the heating zone. So if a schedule is on or if the mode is constant ON then the zone will switch to Advance Off or Const Off and vice versa. If a zone is switched ON via Alexa but the room temperature is ABOVE the target temperature (if thermostat support is enabled) then the relay will NOT switch ON until the room temperature falls below the target temperaature. 
 
 ## Options

@@ -50,9 +50,6 @@ class api
     static def cmd(text)
         return tasmota.cmd(text)
     end
-    static def log(text)
-        tasmota.log(text)
-    end
     static def set_timer(millis, func, id)
         tasmota.set_timer(millis, func, id)
     end
@@ -90,6 +87,11 @@ class api
     static def publish_result(payload, subtopic)
         var _subtopic = subtopic ? subtopic : "RESULT"
         tasmota.publish_result(payload, _subtopic)
+    end
+    # Find a key in map, case insensitive
+    # Returns key or nil if not found
+    static def find_key_i(m, keyi)
+        return tasmota.find_key_i(m, keyi)
     end
     static def get_relay_count()
         def pin(t, enum)
@@ -173,24 +175,6 @@ class util
     static buttons = nil
     # The alexa class handles comms with Alexa
     static alexa = nil
-    # find a key in map, case insensitive, return actual key or nil if not found
-    static def find_key_i(m, keyi)
-        var keyu = string.toupper(keyi)
-        if isinstance(m, map)
-            for k:m.keys()
-                if string.toupper(k)==keyu
-                    return k
-                end
-            end
-        end
-    end
-    # Restarts the scheduler (i.e., when schedules are updated)
-    static def restart()
-        # Restart sequence - do not alter sequence
-        util.scheduler.stop()
-        util.override.refresh()
-        util.scheduler.start()
-    end
 end
 
 class disp
@@ -276,6 +260,7 @@ class status
             util.alexa.set_power(self.zone, self.power)
         end
     end
+    # zone.target_temp will be set to zone or schedule 't' field
     def set_target()
         api.settings.zones[self.zone].set_target_temp(self.target)
     end
@@ -337,6 +322,8 @@ end
 # zone['e'] = expiry
 # zone['m'] = mode (6 bit for previous & current)
 # zone['p'] = power (2 bit for auto & override)
+# zpne['t'] = target temperature (optional) when THERM enabled
+# zone['r'] = room temperature (optional) when THERM enabled
 class zone: map
     static label = 'l', expiry = 'e', mode = 'm', power = 'p', room = 'r', target = 't'
     # The scheduler will set zone.target to schedule[schedule.target] when schedule starts
@@ -353,7 +340,7 @@ class zone: map
     end
     # validates json payload values if keys present:
     # {"label": "Zone 1", "mode": 0} or {"label": "Zone 1", "mode": 1, "hours": 2}
-    # If validation successful returns a zone instance else raises an assert_failed error 
+    # If validation successful returns a zone map else raises an assert_failed error 
     static def fromjson(m, action)
         # If payload is from an update return only keys updated
         var z = action == 'update' ? {} : zone()
@@ -491,14 +478,6 @@ class zones: list
     def get_mode(z, p)
         return self[z].get_mode(p)
     end
-    # Gets zone.room or zone.target temp
-    def get_temp(z, field)
-        return self[z].get_temp(field)
-    end
-    # Sets zone.room or zone.target temp
-    def set_temp(z, field, temp)
-        return self[z].set_temp(field, temp)
-    end
     # Set relay state based on temp
     def set_relay(z)
         self[z].set_relay(z)
@@ -539,7 +518,7 @@ class zones: list
         var m = self.get_mode(z)
         var p = self.get_power(z, m)
         var e = self.get_expiry(z)
-        var t = self.get_temp(z, zone.target)
+        var t = self[z].get_temp(zone.target)
         return status(z, m, p, e, t)
     end
     def tojson()
@@ -923,6 +902,7 @@ class config
     def toggle_ui(enable)
         ui.publish(enable ? "ON" : "OFF")
         for z: api.settings.zones.keys()
+            # Remove hyperlink to web ui if ui disabled
             var stat = api.settings.zones.get_status(z)
             stat.set_sensor()
         end
@@ -1001,6 +981,23 @@ class config
             api.settings.options = 22 # UI/LED/MQTT enabled
         end
     end
+    # Refreshes zones on re/start or schedue/zone changes
+    # Refreshes scheduler/override depending on mode of each zone
+    def refresh()
+        for zone: 0 .. size(api.settings.zones)-1
+            var mode = api.settings.zones.get_mode(zone)
+            if mode == 0
+                # Process schedule/auto zone
+                util.scheduler.refresh(zone)
+            else
+                # If mode is override set schedule power state
+                var power = api.settings.schedules.get_next_status(zone).power
+                api.settings.zones.set_power(zone, power)
+                # Process override zone
+                util.override.refresh(zone, mode)
+            end
+        end
+    end
 end
 
 # This class is responsible for setting timers - 1 for each schedule
@@ -1021,29 +1018,17 @@ class scheduler
         var millis = / now -> 60000-now['sec']*1000
         var callback = / formatter, local -> self.on_tick(formatter, local)
         time.set_timer(millis, callback, 'scheduler', true)
-        self.on_start()
+        self.running = true
     end
     def stop()
         self.running = false
         self.schedules.clear()
         api.remove_timer('scheduler')
     end
-    # This method is only used when the scheduler is first run.
-    # It retrieves statuses for next auto mode run times
-    def on_start()
-        self.running = true
-        var z = 0
-        while z < size(api.settings.zones)
-            if api.settings.zones.get_mode(z)
-                # If mode is override set schedule power state
-                var power = api.settings.schedules.get_next_status(z).power
-                api.settings.zones.set_power(z, power)
-            else
-                # Set power states and display/log schedule status
-                self.on_completed(z)
-            end
-            z += 1
-        end
+    # This method is only used when the scheduler is re/started
+    # It publishes info for next auto mode run times
+    def refresh(zone)
+        self.on_completed(zone)
     end
     def on_tick(formatter, local)
         # Ensure time is exactly 'on the minute'
@@ -1187,10 +1172,6 @@ class override
         api.remove_timer(id)
         api.settings.zones.set_power(zone, false, true)
         api.settings.zones.set_expiry(zone, 0)
-        api.log(string.format(
-            'BRY: %s boost off', 
-            api.settings.zones.get_label(zone))
-        )
     end
     # Toggle zone state
     def advance(zone)
@@ -1252,18 +1233,13 @@ class override
             return true
         end
     end
-    # Refresh overrides for all zones on re-start or schedule/zone changes.
-    def refresh()
-        var zone = 0
-        while zone < size(api.settings.zones)
-            var mode = api.settings.zones.get_mode(zone)
-            if mode == 1
-                var expiry = api.settings.zones.get_expiry(zone) - api.rtc()['local']
-                self.set(zone, mode, expiry)
-            elif mode  > 1
-                self.set(zone, mode)
-            end
-            zone += 1
+    # Refresh overrides for all zones on re/start or schedule/zone changes.
+    def refresh(zone, mode)
+        if mode == 1 # Boost
+            var expiry = api.settings.zones.get_expiry(zone) - api.rtc()['local']
+            self.set(zone, mode, expiry)
+        elif mode  > 1  # All other override modes
+            self.set(zone, mode)
         end
     end
     # Set the mode for a given zone per flow control map
@@ -1507,7 +1483,7 @@ class zone_command: command
         end
         if isinstance(payload_json, map)
             for k: ['new', 'update']
-                var key = util.find_key_i(payload_json, k)
+                var key = api.find_key_i(payload_json, k)
                 if key && isinstance(payload_json[key], map)
                     var z
                     try z = zone.fromjson(payload_json[key], k)
@@ -1698,7 +1674,7 @@ class schedule_command: command
         end
         if isinstance(payload_json, map)
             for k: ['new', 'update']
-                var key = util.find_key_i(payload_json, k)
+                var key = api.find_key_i(payload_json, k)
                 if key && isinstance(payload_json[key], map)
                     payload_json[key].setitem('id', idx)
                     try payload_json = schedule.fromjson(payload_json[key], k)
@@ -1729,7 +1705,7 @@ class schedule_command: command
         if payload.contains(schedule.target) && payload[schedule.target] == nil
             payload.remove(schedule.target)
         end
-        if api.settings.schedules.push(payload, true) util.restart() end
+        if api.settings.schedules.push(payload, true) util.config.refresh() end
     end
     def update(payload)
         # Handle updated target temp for schedule
@@ -1752,10 +1728,10 @@ class schedule_command: command
             end
         end
         # If there are other fields, update schedule as normal
-        if api.settings.schedules.update(payload) util.restart() end    
+        if api.settings.schedules.update(payload) util.config.refresh() end    
     end
     def delete(idx)
-        if api.settings.schedules.pop(idx) util.restart() end
+        if api.settings.schedules.pop(idx) util.config.refresh() end
     end
 end
 
@@ -1816,10 +1792,10 @@ class HeatingController
     end
     # Called once the RTC is initialized (Time#Initialized)
     def time_initialized()
-        # Restore override state
-        util.override.refresh()
         # Start the scheduler
         util.scheduler.start()
+        # Hydrate schedules and zone overrides
+        util.config.refresh()
     end
     # When MQTT connects send heating status for all zones
     def mqtt_connected()
@@ -1830,15 +1806,15 @@ class HeatingController
         end
     end
     def display_initialised()
-        tasmota.set_timer(0, /->tasmota.remove_rule("HeatingDisplay==ACK"))
-        tasmota.set_timer(0, /->tasmota.remove_rule("HeatingDisplay==SYN"))
+        api.set_timer(0, /->api.remove_rule("HeatingDisplay==ACK"))
+        api.set_timer(0, /->api.remove_rule("HeatingDisplay==SYN"))
         var opt = util.options['DISPLAY']
         util.config.configure_option(opt, util.config.is_option_set(opt))
     end
     def ui_initialised()
         ui.initialised = true
-        tasmota.set_timer(0, /->tasmota.remove_rule("HeatingUI==ACK"))
-        tasmota.set_timer(0, /->tasmota.remove_rule("HeatingUI==SYN"))
+        api.set_timer(0, /->api.remove_rule("HeatingUI==ACK"))
+        api.set_timer(0, /->api.remove_rule("HeatingUI==SYN"))
         var opt = util.options['UI']
         util.config.configure_option(opt, util.config.is_option_set(opt))
     end
