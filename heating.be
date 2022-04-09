@@ -56,6 +56,9 @@ class api
     static def remove_timer(id)
         tasmota.remove_timer(id)
     end
+    static def get_power()
+        return tasmota.get_power()
+    end
     static def set_power(zone, power)
         if api.get_relay_count() > zone
             if tasmota.get_power()[zone] != power
@@ -140,7 +143,7 @@ class util
     ]
     # --------------------------------------------------------------------------------------------------
     # DISPLAY:  Enable support for I2C LCD 20x4/20x2 display or SPI 320x240 ILI9341 (default: false)
-    # CMD:  Enable Tasmota/MQTT "zone" command to change a zone's mode (default: true)
+    # UI:  Enable web UI - requires hc_wgui.tapp (default: true)
     # LED:  Enable addressable LED indicator lights (WS2812 pin needs to be set) (default: true)
     # THERMC: Enable thermostat integration (default: false)
     # MQTT: Enable the publishing of MQTT heating zone telemetry (default: true)
@@ -238,6 +241,7 @@ class status
     def update_display()
         if !util.config.is_option_set(util.options['DISPLAY']) return end
         disp.publish(self.tojson())
+        api.settings.zones.pub_therm(self.zone)
     end
     # WS2812 LED (1 pixel per zone) indicator
     def set_led()
@@ -249,10 +253,7 @@ class status
     # Set the relay power state
     def set_relay()
         # Only set the power on if room temp < target temp
-        var heat = util.config.is_option_set(util.options['THERM'])
-            ? api.settings.zones[self.zone].heat()
-            : true        
-        api.set_power(self.zone, self.power && heat)
+        api.settings.zones.set_relay(self.zone, self.power)
     end
     # Update Alexa power state
     def set_alexa()
@@ -304,15 +305,14 @@ class status
         self.set_target()
         self.set_sensor()
         self.set_led()
+        self.set_relay()
         self.pub_mqtt()
         self.update_display()
-        self.set_relay()
         self.set_alexa()
     end
     # Helper map for self.pub_mqtt()
     def tojson()
-        var zjs = api.settings.zones[self.zone].tojson()
-        zjs['id'] = self.zone+1
+        var zjs = api.settings.zones[self.zone].tojson(self.zone)
         return {"HeatingZone":  zjs}
     end
 end
@@ -402,13 +402,6 @@ class zone: map
         end
         return true
     end
-    def set_relay(zone)
-        var power = self.get_power(self.get_mode())
-        var heat = util.config.is_option_set(util.options['THERM'])
-            ? self.heat() 
-            : true
-        api.set_power(zone, power && heat)
-    end
     # Returns the zone's mode (current or previous)
     def get_mode(p)
         var lsb = p ? 3 : 0, msb = lsb + 2
@@ -427,9 +420,10 @@ class zone: map
             util.modes[m], 
             self.get_power(m) ? 'On' : 'Off'), self[self.expiry])
     end
-    def tojson()
+    def tojson(idx)
         var m = self.get_mode()
         var z = {
+            "id":  idx+1,
             "label": self[self.label],
             "mode": m,
             "power": self.get_power(m),
@@ -478,9 +472,24 @@ class zones: list
     def get_mode(z, p)
         return self[z].get_mode(p)
     end
-    # Set relay state based on temp
-    def set_relay(z)
-        self[z].set_relay(z)
+    # Set relay state (considering temp if THERM option is set)
+    def set_relay(z, p)
+        p = p != nil ? p : self[z].get_power(self[z].get_mode())
+        var h = util.config.is_option_set(util.options['THERM'])
+            ? self[z].heat() 
+            : true
+        api.set_power(z, p && h)
+    end
+    def pub_therm(z)
+        var ht = {
+            "zone": z+1,
+            "heat": api.get_power()[z]
+        }
+        if util.config.is_option_set(util.options['THERM'])
+            ht["target temp"] = self[z].target_temp
+            ht["room temp"] = self[z].get_temp(zone.room)
+        end
+        disp.publish({"HeatingStatus": ht})
     end
     # Set the mode for a given zone
     def set_mode(z, m)
@@ -524,8 +533,7 @@ class zones: list
     def tojson()
         var l = []
         for k: self.keys()
-            var jsz = self[k].tojson()
-            jsz['id'] = k+1
+            var jsz = self[k].tojson(k)
             l.push(jsz)
         end
         return l
@@ -887,6 +895,8 @@ class config
             set ? self.enable_leds(configure) : self.disable_leds()
         elif opt == util.options['UI']
             self.toggle_ui(set)
+        elif opt == util.options['THERM']
+            self.update_therm()
         end
     end
     # Configures options - called by HeatingController on startup
@@ -925,6 +935,14 @@ class config
     # If DISPlAY option is unset, disable the screen
     def disable_display()
         disp.publish("OFF")
+    end
+    # If THERN option changes, relay & display needs updating
+    def update_therm()
+        for z: api.settings.zones.keys()
+            api.settings.zones.set_relay(z)
+            # Needs to be a deferred call as nested pubs blocked
+            api.set_timer(0, /->api.settings.zones.pub_therm(z))
+        end
     end
     # Do not call before load() as pixel count needs zone size
     def enable_leds(configure)        
@@ -1509,14 +1527,14 @@ class zone_command: command
         elif string.tolower(payload) == "delete"
             self.delete(idx)
         elif string.tolower(payload) == "runningschedule"
-            var jz = api.settings.zones[idx].tojson()
+            var jz = api.settings.zones[idx].tojson(idx)
             jz['id'] = idx+1
             var js = util.scheduler.get_running_schedule(idx)
             if js js = js.tojson() end
             api.resp_cmnd(json.dump({self.cmd: jz, "RunningSchedule": js}))
             return
         elif payload == ''
-            var zone = api.settings.zones[idx].tojson()
+            var zone = api.settings.zones[idx].tojson(idx)
             zone['id'] = idx+1
             api.resp_cmnd(json.dump({self.cmd: zone}))
             return
@@ -1576,7 +1594,8 @@ class zone_command: command
         end
         var room = set_temp(zone.room)
         if target || room
-            api.settings.zones[idx].set_relay(idx)
+            api.settings.zones.set_relay(idx)
+            api.settings.zones.pub_therm(idx)
         end
         var _dirty = false
         # Process label
@@ -1725,7 +1744,8 @@ class schedule_command: command
                         for z: api.settings.zones.keys()
                             if s.is_set(schedule.zones, z)
                                 api.settings.zones[z].set_target_temp(target)
-                                api.settings.zones[z].set_relay(z)
+                                api.settings.zones.set_relay(z)
+                                api.settings.zones.pub_therm(z)
                             end
                         end
                     end

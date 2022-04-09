@@ -104,7 +104,8 @@ class touchscreen
         self.colors = [
             lv.PALETTE_BLUE, 
             lv.PALETTE_GREEN, 
-            lv.PALETTE_RED
+            lv.PALETTE_RED,
+            lv.PALETTE_GREY
         ]
         self.zones = {}
     end
@@ -289,6 +290,12 @@ class touchscreen
             self.zones[idx]['switch'].clear_state(lv.STATE_CHECKED)
         end
     end
+    def update_status(status)
+        var idx = status['zone']-1
+        if !self.zones.contains(idx) return end
+        var color = status['heat'] ? self.colors[0] : self.colors[3]
+        self.zones[idx]['label'].set_style_bg_color(lv.palette_darken(color, 2), 0)
+    end
     def start()
         self.power(true)
         self.set_styles()
@@ -298,6 +305,7 @@ class touchscreen
         self.start_clock()
         tasmota.add_rule("HeatingDisplay#HeatingZone", /z-> self.update_zone(z))
         tasmota.add_rule("HeatingDisplay#ClearZone", /z-> self.clear_zone(z))
+        tasmota.add_rule("HeatingDisplay#HeatingStatus", /s-> self.update_status(s))
     end
     def start_clock()
         clock.start(/->self.update_clock())
@@ -310,6 +318,7 @@ class touchscreen
         wifi.callback = nil
         tasmota.remove_rule("HeatingDisplay#HeatingZone")
         tasmota.remove_rule("HeatingDisplay#ClearZone")
+        tasmota.remove_rule("HeatingDisplay#HeatingStatus")
         self.stop_clock()
         self.grid.del()
         self.power(false)
