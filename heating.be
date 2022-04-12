@@ -241,7 +241,7 @@ class status
     def update_display()
         if !util.config.is_option_set(util.options['DISPLAY']) return end
         disp.publish(self.tojson())
-        api.settings.zones.pub_therm(self.zone)
+        api.settings.zones.pub_heat(self.zone)
     end
     # WS2812 LED (1 pixel per zone) indicator
     def set_led()
@@ -480,7 +480,10 @@ class zones: list
             : true
         api.set_power(z, p && h)
     end
-    def pub_therm(z)
+    def pub_heat(z)
+        if !util.config.is_option_set(util.options['DISPLAY']) 
+            return
+        end
         var ht = {
             "zone": z+1,
             "heat": api.get_power()[z]
@@ -941,7 +944,7 @@ class config
         for z: api.settings.zones.keys()
             api.settings.zones.set_relay(z)
             # Needs to be a deferred call as nested pubs blocked
-            api.set_timer(0, /->api.settings.zones.pub_therm(z))
+            api.set_timer(0, /->api.settings.zones.pub_heat(z))
         end
     end
     # Do not call before load() as pixel count needs zone size
@@ -1524,22 +1527,35 @@ class zone_command: command
                     break
                 end
             end
-        elif string.tolower(payload) == "delete"
+        else
+            payload = string.tolower(payload)
+        end
+        if payload == "delete"
             self.delete(idx)
-        elif string.tolower(payload) == "runningschedule"
+        elif payload == "runningschedule"
             var jz = api.settings.zones[idx].tojson(idx)
             jz['id'] = idx+1
             var js = util.scheduler.get_running_schedule(idx)
             if js js = js.tojson() end
             api.resp_cmnd(json.dump({self.cmd: jz, "RunningSchedule": js}))
             return
+        elif payload == 'heat'
+            if api.settings.zones.get_power(idx, self.get_mode(idx))
+                api.set_power(idx, true)
+                api.settings.zones.pub_heat(idx)
+            end
+        elif payload == 'idle'
+            if api.settings.zones.get_power(idx, self.get_mode(idx))
+                api.set_power(idx, false)
+                api.settings.zones.pub_heat(idx)
+            end
         elif payload == ''
             var zone = api.settings.zones[idx].tojson(idx)
             zone['id'] = idx+1
             api.resp_cmnd(json.dump({self.cmd: zone}))
             return
         else
-            var power = util.cmd_params.find(string.tolower(payload))
+            var power = util.cmd_params.find(payload)
             if power != nil 
                 util.override.toggle_zone(idx, power)
             end
@@ -1595,7 +1611,7 @@ class zone_command: command
         var room = set_temp(zone.room)
         if target || room
             api.settings.zones.set_relay(idx)
-            api.settings.zones.pub_therm(idx)
+            api.settings.zones.pub_heat(idx)
         end
         var _dirty = false
         # Process label
@@ -1745,7 +1761,7 @@ class schedule_command: command
                             if s.is_set(schedule.zones, z)
                                 api.settings.zones[z].set_target_temp(target)
                                 api.settings.zones.set_relay(z)
-                                api.settings.zones.pub_therm(z)
+                                api.settings.zones.pub_heat(z)
                             end
                         end
                     end
