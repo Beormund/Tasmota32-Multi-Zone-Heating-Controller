@@ -56,6 +56,15 @@ class api
     static def remove_timer(id)
         tasmota.remove_timer(id)
     end
+    static def add_cron(cron, func, id)
+        tasmota.add_cron(cron, func, id)
+    end
+    static def remove_cron(id)
+        tasmota.remove_cron(id)
+    end
+    static def next_cron(id)
+        return tasmota.next_cron(id)
+    end
     static def get_power()
         return tasmota.get_power()
     end
@@ -194,20 +203,6 @@ class ui
 end
 
 class time
-    # Used to create timers for override boost and displaying time
-    static def set_timer(millis, callback, id, repeat)
-        var now = api.time_dump(api.rtc()['local'])
-        api.set_timer(
-            millis(now),
-            def()
-                var t = api.rtc()['local']
-                callback(/fmt-> api.strftime(fmt, t), t)
-                if !repeat return end
-                time.set_timer(millis, callback, id, repeat)
-            end,
-            id
-        )
-    end
     static def round(time, interval)
         var offset = time % interval
         var rounded = time - offset
@@ -367,7 +362,8 @@ class zone: map
             end
         end
         if z.contains(zone.mode) && z[zone.mode] == 1
-            # If mode is boost then expiry should be > 0
+            # If mode is boost then expiry should be present AND should be > 0
+            assert(z.contains(zone.expiry), msg('hours'))
             assert(z[zone.expiry] > 0, msg('hours'))
         end
         return z
@@ -1041,24 +1037,20 @@ class scheduler
             self.run_schedule(api.settings.schedules[s])
             s += 1
         end
-        var millis = / now -> 60000-now['sec']*1000
-        var callback = / formatter, local -> self.on_tick(formatter, local)
-        time.set_timer(millis, callback, 'scheduler', true)
+        api.add_cron("0 * * * * *", / now -> self.on_tick(now), 'scheduler')
         self.running = true
     end
     def stop()
         self.running = false
         self.schedules.clear()
-        api.remove_timer('scheduler')
+        api.remove_cron('scheduler')
     end
     # This method is only used when the scheduler is re/started
     # It publishes info for next auto mode run times
     def refresh(zone)
         self.on_completed(zone)
     end
-    def on_tick(formatter, local)
-        # Ensure time is exactly 'on the minute'
-        local = time.round(local, 60)
+    def on_tick(local)
         var i = 0
         while i < size(self.schedules)
             if self.schedules[i]['runat'] <= local
@@ -1179,10 +1171,9 @@ class override
     end
     # turn zone on if off for duration or extend time if on.
     def boost(zone, secs)
-        var id = 'boost' .. zone
         var callback = / -> self.on_boost_end(zone)
-        var millis = / -> !secs ? 3600000 : secs * 1000
-        time.set_timer(millis, callback, id, false)
+        var millis = !secs ? 3600000 : secs * 1000
+        api.set_timer(millis, callback, 'boost' .. zone)
         var expiry = (!secs ? 3600 : secs) + api.rtc()['local']
         api.settings.zones.set_zone(zone, 1, true, expiry)
         self.on_completed(zone)

@@ -36,43 +36,12 @@ class wifi
  end
 
  class clock
-    static callback = nil
     static initialised = false
-    static waiting = false
     static def initialise()
         clock.initialised = true
-        if clock.waiting
-            clock.waiting = false
-            clock.callback()
-            clock.set_timer()
+        if lvgl_display._display
+            lvgl_display._display.update_clock(tasmota.rtc()['local'])
         end
-    end
-    static def start(callback)
-        clock.callback = callback
-        if clock.initialised
-            clock.set_timer()
-        else
-            clock.waiting = true
-        end
-    end
-    static def set_timer()
-        tasmota.set_timer(
-            def()
-                var l = tasmota.rtc()['local']
-                var t = tasmota.time_dump(l)
-                return 60000-t['sec']*1000
-            end(),
-            def() 
-                if clock.callback
-                    clock.callback()
-                end
-                clock.set_timer() 
-            end, 
-            "hc_lvgl_timer"
-        )
-    end
-    static def stop()
-        tasmota.remove_timer("hc_lvgl_timer")
     end
  end
 
@@ -127,8 +96,8 @@ class touchscreen
             tasmota.cmd(string.format("HeatingZone%s %s", zone+1, json.dump(payload)))
         end
     end
-    def update_clock()
-        self.datetime.set_text(tasmota.strftime("%d %b %Y %H:%M", tasmota.rtc()['local']))
+    def update_clock(now)
+        self.datetime.set_text(tasmota.strftime("%d %b %Y %H:%M", now))
     end
     def wifi_connected(bool)
         self.wifi_icon.set_style_text_color(
@@ -223,10 +192,7 @@ class touchscreen
         wifi.callback = / bool -> self.wifi_connected(bool)
         # subscribe to initial time
         if clock.initialised 
-            self.update_clock()
-            clock.start(self.update_clock)
-        else
-            clock.callback = / -> self.update_clock()
+            self.update_clock(tasmota.rtc()['local'])
         end
     end
     def set_panels()
@@ -308,10 +274,10 @@ class touchscreen
         tasmota.add_rule("HeatingDisplay#HeatingStatus", /s-> self.update_status(s))
     end
     def start_clock()
-        clock.start(/->self.update_clock())
+        tasmota.add_cron("0 * * * * *", / now -> self.update_clock(now), "lvgl")
     end
     def stop_clock()
-        clock.stop()
+        tasmota.remove_cron("lvgl")
     end
     def stop()
         lv.scr_load(lv.obj(0))
