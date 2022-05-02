@@ -70,6 +70,8 @@ The above template configures the GPIO pins as follows:
 * GPIO32 - Button 2
 * GPIO33 - Button 3
 
+To use the Universal Display driver you will need to assign `Option A - 3` on an unused GPIO pin.
+
 Navigate to **Configure Module** and ensure the above template is selected. Restart.
 
 ### 3. Configure Tasmota Options
