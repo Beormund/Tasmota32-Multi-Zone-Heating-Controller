@@ -1303,8 +1303,13 @@ class driver
     end
     # Called by Tasmota on teleperiod
     def json_append()
-        var jsonstr = json.dump(api.settings.zones.tojson())
-        var msg = ",\"HeatingZones\":" .. jsonstr
+        var msg = ''
+        var z = 0
+        while z < size(api.settings.zones)
+            var jsonstr = json.dump(api.settings.zones[z].tojson(z))
+            msg += string.format(",\"HeatingZone%s\":%s", z+1, jsonstr)
+            z += 1
+        end
         api.response_append(msg)
     end
 end
@@ -1464,12 +1469,12 @@ class options_command: command
 end
 
 # Publishes the status of all zones as json payload
-# zones -> 
-# {"Zones": {
-#    "Zone3": {"Power":"Off","Label":"WTR","Mode":"Auto","Until":"2022-02-03T16:30:00"},
-#    "Zone1": {"Power":"Off","Label":"HTG1","Mode":"Auto","Until":"2022-02-03T16:30:00"},
-#    "Zone2": {"Power":"On","Label":"HTG2","Mode":"Day","Until":"2022-02-03T22:00:00"}
-# }}
+# HeatingZones -> 
+# {"HeatingZones": [
+#    {"id":1,"label":"GROUND","expiry":1651595400,"info":"GROUND Auto Off until 16:30 Tue 03 May 22","power":false,"mode":0},
+#    {"id":2,"label":"FIRST","expiry":1651615200,"info":"FIRST Day On until 22:00 Tue 03 May 22","power":true,"mode":5},
+#    {"id":3,"label":"WATER","expiry":1651595400,"info":"WATER Auto Off until 16:30 Tue 03 May 22","power":false,"mode":0}
+# ]}
 class zones_command: command
     static cmd = 'HeatingZones'
     def init() super(self).init() end
