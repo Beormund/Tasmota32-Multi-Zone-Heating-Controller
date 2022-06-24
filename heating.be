@@ -1069,7 +1069,7 @@ class scheduler
         var running = s.is_running()
         # Get the next run time depending on power state
         var runat = s.get_runat(running ? s.off : s.on)
-        # Call on_pop when the timer expires
+        # Add to list of running schedules
         self.schedules.push({"id": s[schedule.id], "running": running, "runat": runat})
     end
     def get_running_schedules()
