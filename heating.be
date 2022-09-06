@@ -173,7 +173,7 @@ class util
         'true': true, 
         'false': false
     }
-    # Enabled access to WS2812 LEDs
+    # Enable access to WS2812 LEDs
     static WS2812 = nil
     # Enable easy access to config. HeatingController initialises the config
     static config = nil
@@ -622,9 +622,9 @@ class schedule: map
     end
     # Converts a string time to seconds from midnight
     # E.g., 10:15 -> 10x3600 + 15x60 
-    def str2secs(str)
-        var hours = int(str[0..1])
-        var mins = int(str[3..4])
+    def str2secs(tstr)
+        var hours = int(tstr[0..1])
+        var mins = int(tstr[3..4])
         return hours*3600+mins*60
     end
     # Converts 36000 to "10:00"
@@ -1055,7 +1055,7 @@ class scheduler
         while i < size(self.schedules)
             if self.schedules[i]['runat'] <= local
                 var id = self.schedules[i]['id']
-                # Running always altenates between on and off
+                # Running always alternates between on and off
                 var running = !self.schedules[i]['running']
                 self.schedules.remove(i)
                 self.on_pop(api.settings.schedules.get(id), running)

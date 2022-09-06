@@ -27,8 +27,8 @@ class wifi
     # Used to hold wifi notification callback
     static callback = nil
     # Notify consumer of wifi status changes
-    static def set_status(bool)
-        wifi.connected = bool
+    static def set_status(status)
+        wifi.connected = status
         if wifi.callback
             wifi.callback(wifi.connected)
         end
@@ -99,9 +99,9 @@ class touchscreen
     def update_clock(now)
         self.datetime.set_text(tasmota.strftime("%d %b %Y %H:%M", now))
     end
-    def wifi_connected(bool)
+    def wifi_connected(status)
         self.wifi_icon.set_style_text_color(
-            lv.palette_main(bool ? lv.PALETTE_BLUE : lv.PALETTE_RED), 0
+            lv.palette_main(status ? lv.PALETTE_BLUE : lv.PALETTE_RED), 0
         )
     end
     def set_styles()
@@ -189,7 +189,7 @@ class touchscreen
         var color = wifi.connected ? lv.PALETTE_BLUE : lv.PALETTE_RED 
         self.wifi_icon.set_style_text_color(lv.palette_main(color), 0)
         # subscribe to wifi notifications
-        wifi.callback = / bool -> self.wifi_connected(bool)
+        wifi.callback = / status -> self.wifi_connected(status)
         # subscribe to initial time
         if clock.initialised 
             self.update_clock(tasmota.rtc()['local'])
@@ -289,9 +289,9 @@ class touchscreen
         self.grid.del()
         self.power(false)
     end
-    def power(bool)
+    def power(status)
         import display
-        display.dimmer(bool ? 100 : 0)
+        display.dimmer(status ? 100 : 0)
     end
 end
 

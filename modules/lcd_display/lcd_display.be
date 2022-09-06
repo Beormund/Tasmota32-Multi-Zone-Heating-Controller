@@ -355,8 +355,8 @@ class dotmatrixscreen
         self.stop_clock()
         self.power(false)
     end
-    def power(bool)
-        self.lcd.set_backlight(bool)
+    def power(state)
+        self.lcd.set_backlight(state)
     end
     def update_clock()
         self.lcd.write_line(tasmota.strftime('%H:%M %a %d %b %y', tasmota.rtc()['local']), 1)
