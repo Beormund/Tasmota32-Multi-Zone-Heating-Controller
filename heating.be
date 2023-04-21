@@ -1810,11 +1810,11 @@ class HeatingController
         # Fires when MQTT has connected
         api.add_rule('Mqtt#Connected', /-> self.mqtt_connected())
         # If ACK received from display, flag as initialised
-        api.add_rule("HeatingDisplay==ACK", /-> 
+        api.add_rule("HeatingDisplay=ACK", /-> 
             api.set_timer(0, /-> self.display_initialised())
         )       
         # If ACK received from UI, flag as initialised
-        api.add_rule("HeatingUI==ACK", /-> 
+        api.add_rule("HeatingUI=ACK", /-> 
             api.set_timer(0, /-> self.ui_initialised())
         )
         # Request ACK frm UI & DISPLAY modules
@@ -1843,15 +1843,15 @@ class HeatingController
         end
     end
     def display_initialised()
-        api.set_timer(0, /->api.remove_rule("HeatingDisplay==ACK"))
-        api.set_timer(0, /->api.remove_rule("HeatingDisplay==SYN"))
+        api.set_timer(0, /->api.remove_rule("HeatingDisplay=ACK"))
+        api.set_timer(0, /->api.remove_rule("HeatingDisplay=SYN"))
         var opt = util.options['DISPLAY']
         util.config.configure_option(opt, util.config.is_option_set(opt))
     end
     def ui_initialised()
         ui.initialised = true
-        api.set_timer(0, /->api.remove_rule("HeatingUI==ACK"))
-        api.set_timer(0, /->api.remove_rule("HeatingUI==SYN"))
+        api.set_timer(0, /->api.remove_rule("HeatingUI=ACK"))
+        api.set_timer(0, /->api.remove_rule("HeatingUI=SYN"))
         var opt = util.options['UI']
         util.config.configure_option(opt, util.config.is_option_set(opt))
     end

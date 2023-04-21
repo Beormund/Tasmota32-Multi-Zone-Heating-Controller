@@ -264,9 +264,9 @@ class driver
     def init()
         self._enabled = false
         # Subscribe to events sent from Heating Controller
-        tasmota.add_rule("HeatingUI==ON", /->tasmota.set_timer(0, /->self.start()))
-        tasmota.add_rule("HeatingUI==OFF", /->self.stop())
-        tasmota.add_rule("HeatingUI==SYN", /->tasmota.set_timer(0, /->self.ack()))
+        tasmota.add_rule("HeatingUI=ON", /->tasmota.set_timer(0, /->self.start()))
+        tasmota.add_rule("HeatingUI=OFF", /->self.stop())
+        tasmota.add_rule("HeatingUI=SYN", /->tasmota.set_timer(0, /->self.ack()))
         # Once UI loads an initialisation trigger is broadcast
         self.ack()          
     end
@@ -329,19 +329,3 @@ end
 var d = driver()
 
 return heating_ui
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
