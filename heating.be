@@ -23,11 +23,11 @@ class api
     static wd = tasmota.wd
     static settings = persist
     static WS2812 = gpio.pin(gpio.WS2812, 1) 
-    static def strftime(format, secs)
-        return tasmota.strftime(format, secs)
+    static def strftime(fmt, secs)
+        return tasmota.strftime(fmt, secs)
     end
-    static def strptime(time, format)
-        return tasmota.strptime(time, format)
+    static def strptime(time, fmt)
+        return tasmota.strptime(time, fmt)
     end
     static def rtc()
         return tasmota.rtc()
@@ -288,12 +288,6 @@ class status
             self.expiry
         )
         api.settings.zones[self.zone].sensor = msg
-    end
-    def format(args)
-        return api.strftime(
-            call(string.format, args), 
-            self.expiry
-        )
     end
     # Update logs, LED, MQTT and screen
     def notify()
