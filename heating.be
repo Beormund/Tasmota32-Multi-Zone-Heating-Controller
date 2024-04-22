@@ -1478,25 +1478,28 @@ class zones_command: command
     end
 end
 
-# Handler for zone command
-# zone1 1 -> turn on heating zone 1
-# zone2 0 -> turn off heating zone 2
-# zone3 {update: {"mode": 5}} -> If not in Day mode, switch to Day mode
-# zone3 {update: {"mode": 1, "hours": 2}} -> Boost zone 3 for 2 hours
-# zone {new: {"mode": 4, "label": "HTWR"}} -> The new zone will be created
-# zone3 delete -> delete zone 3
+# Handler for HeatingZone command
+# HeatingZone1 1 -> turn on heating zone 1
+# HeatingZone2 0 -> turn off heating zone 2
+# HeatingZone3 {update: {"mode": 5}} -> If not in Day mode, switch to Day mode
+# HeatingZone3 {update: {"mode": 1, "hours": 2}} -> Boost zone 3 for 2 hours
+# HeatingZone {new: {"mode": 4, "label": "HTWR"}} -> The new zone will be created
+# HeatingZone3 delete -> delete zone 3
 class zone_command: command
     static cmd = 'HeatingZone'
     def init() super(self).init() end
     def get_mode(zone)
         return api.settings.zones.get_mode(zone)
     end
+    def check_idx(idx)
+        if idx < 0 || idx > api.settings.zones.size()-1
+            api.resp_cmnd(json.dump({self.cmd..idx+1: 'Not Found'}))
+            return false
+        end
+        return true
+    end
     def on_cmd(cmd, idx, payload, payload_json)
         idx-=1
-        if idx < 0 || idx > api.settings.zones.size()-1
-            api.resp_cmnd(json.dump({self.cmd: nil}))
-            return
-        end
         if isinstance(payload_json, map)
             for k: ['new', 'update']
                 var key = api.find_key_i(payload_json, k)
@@ -1519,6 +1522,9 @@ class zone_command: command
             end
         else
             payload = string.tolower(payload)
+        end
+        if !self.check_idx(idx)
+            return
         end
         if payload == "delete"
             self.delete(idx)
@@ -1588,6 +1594,9 @@ class zone_command: command
         util.config.save()
     end
     def update(idx, payload)
+        if !self.check_idx(idx)
+            return
+        end
         # Process temperatures
         def set_temp(f)
             if payload.contains(f)

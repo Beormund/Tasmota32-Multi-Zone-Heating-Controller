@@ -79,17 +79,17 @@ class touchscreen
         self.zones = {}
     end
     def switch_clicked_cb(obj, event)
-        var code = event.code
+        var code = event.get_code()
         if code == lv.EVENT_VALUE_CHANGED
-            var zone = int(event.user_data)
+            var zone = int(event.get_user_data())
             var power = obj.has_state(lv.STATE_CHECKED)
             tasmota.cmd(string.format("HeatingZone%s %s", zone+1, power))
         end
     end
     def dropdown_changed_cb(obj, event)
-        var code = event.code
+        var code = event.get_code()
         if code == lv.EVENT_VALUE_CHANGED
-            var zone = int(event.user_data)
+            var zone = int(event.get_user_data())
             var option = obj.get_selected()
             var payload = {"update": {"mode": option}}
             if option == 1 payload["update"]['hours'] = 1 end
@@ -108,9 +108,9 @@ class touchscreen
         # Main container style
         if touchscreen.gs != nil return end
         touchscreen.gs = lv.style()
-        touchscreen.gs.set_bg_color(lv.color_black(),0)
-        touchscreen.gs.set_bg_grad_color(lv.palette_main(lv.PALETTE_ORANGE), 0)
-        touchscreen.gs.set_bg_grad_dir(lv.GRAD_DIR_VER, 0)
+        touchscreen.gs.set_bg_color(lv.color_black())
+        touchscreen.gs.set_bg_grad_color(lv.palette_main(lv.PALETTE_ORANGE))
+        touchscreen.gs.set_bg_grad_dir(lv.GRAD_DIR_VER)
         touchscreen.gs.set_radius(0)
         touchscreen.gs.set_border_width(0)
         touchscreen.gs.set_pad_top(0)
