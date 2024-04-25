@@ -1385,9 +1385,9 @@ class command
     def add_command()
         api.add_cmd(self.cmd, / c, i, p, j -> self.on_cmd(c, i, p, j))
     end
-    def resp_cmnd(idx, msg)
-        var cmd = string.toupper(string.format('%s%d', self.cmd, idx))
-        api.resp_cmnd(string.format('{"%s": "%s"}', cmd, msg ? msg : "DONE"))
+    def resp_cmnd(msg, idx)
+        var cmd = string.format('%s%d', self.cmd, idx)
+        api.resp_cmnd(json.dump({cmd: msg != nil ? msg : "DONE"}))
     end
 end
 
@@ -1396,14 +1396,14 @@ class running_command: command
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
         var j = util.scheduler.get_running_schedules().tojson()
-        api.resp_cmnd(json.dump({self.cmd: j}))
+        self.resp_cmnd(j)
     end
 end
 class modes_command: command
     static cmd = "HeatingModes"
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
-        api.resp_cmnd(json.dump({self.cmd: util.modes}))
+        self.resp_cmnd(util.modes)
     end
 end
 
@@ -1411,7 +1411,7 @@ class days_command: command
     static cmd = "HeatingDays"
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
-        api.resp_cmnd(json.dump({self.cmd: util.days}))
+        self.resp_cmnd(util.days)
     end
 end
 
@@ -1423,7 +1423,7 @@ class labels_command: command
         for z: 0 .. size(api.settings.zones)-1
             l.push(api.settings.zones.get_label(z))
         end
-        api.resp_cmnd(json.dump({self.cmd: l}))
+        self.resp_cmnd(l)
     end
 end
 
@@ -1442,7 +1442,7 @@ class options_command: command
             for k: util.options.keys()
                 m[k] = util.config.is_option_set(util.options[k]) ? 1 : 0
             end
-            api.resp_cmnd(json.dump({self.cmd: m}))
+            self.resp_cmnd(m)
         end
     end
     def set_options(payload)
@@ -1473,8 +1473,7 @@ class zones_command: command
     static cmd = 'HeatingZones'
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
-        var json = json.dump({self.cmd: api.settings.zones.tojson()})
-        api.resp_cmnd(json)
+        self.resp_cmnd(api.settings.zones.tojson())
     end
 end
 
@@ -1493,7 +1492,7 @@ class zone_command: command
     end
     def check_idx(idx)
         if idx < 0 || idx > api.settings.zones.size()-1
-            api.resp_cmnd(json.dump({self.cmd..idx+1: 'Not Found'}))
+            self.resp_cmnd('Not Found', idx+1)
             return false
         end
         return true
@@ -1548,7 +1547,7 @@ class zone_command: command
         elif payload == ''
             var zone = api.settings.zones[idx].tojson(idx)
             zone['id'] = idx+1
-            api.resp_cmnd(json.dump({self.cmd: zone}))
+            self.resp_cmnd(zone)
             return
         else
             var power = util.cmd_params.find(payload)
@@ -1556,7 +1555,7 @@ class zone_command: command
                 util.override.toggle_zone(idx, power)
             end
         end
-        self.resp_cmnd(idx+1)
+        self.resp_cmnd(nil, idx+1)
     end
     def new(payload)
         var idx = api.settings.zones.size()
@@ -1693,8 +1692,7 @@ class schedules_command: command
     static cmd = 'HeatingSchedules'
     def init() super(self).init() end
     def on_cmd(cmd, idx, payload, payload_json)
-        var json = json.dump({self.cmd: api.settings.schedules.tojson()})
-        api.resp_cmnd(json)
+        self.resp_cmnd(api.settings.schedules.tojson())
     end
 end
 
@@ -1706,11 +1704,14 @@ end
 class schedule_command: command
     static cmd = 'HeatingSchedule'
     def init() super(self).init() end
-    def on_cmd(cmd, idx, payload, payload_json)
+    def check_idx(idx)
         if idx < 1 || idx > api.settings.schedules.size()
-            api.resp_cmnd(json.dump({self.cmd: nil}))
-            return
+            self.resp_cmnd('Not Found', idx)
+            return false
         end
+        return true
+    end    
+    def on_cmd(cmd, idx, payload, payload_json)
         if isinstance(payload_json, map)
             for k: ['new', 'update']
                 var key = api.find_key_i(payload_json, k)
@@ -1726,19 +1727,26 @@ class schedule_command: command
                         self.resp_cmnd()
                         return
                     elif k == 'update'
+                        if !self.check_idx(idx)
+                            return
+                        end
                         self.update(payload_json)
                     end
                     break
                 end
             end
-        elif string.tolower(payload) == "delete" && idx > 0
+        end
+        if !self.check_idx(idx)
+            return
+        end
+        if string.tolower(payload) == "delete"
             self.delete(idx)
         elif payload == ''
             var json = json.dump({self.cmd: api.settings.schedules.get(idx).tojson()})
             api.publish_result(json)
             return
         end
-        self.resp_cmnd(idx)
+        self.resp_cmnd(nil, idx)
     end
     def new(payload)
         if payload.contains(schedule.target) && payload[schedule.target] == nil
