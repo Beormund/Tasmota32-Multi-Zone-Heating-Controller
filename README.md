@@ -158,7 +158,13 @@ It is possible for remote wireless thermostats to send simple `heat` or `idle` c
 ## Alexa Support
 
 * If Hue emulation is enabled in the Tasmota UI an Alexa device will be created with the same name as the heating zone's label. Once enabled and the controller is restarted, ask Alexa to "discover devices". 
-* Note that Alexa will turn on/off the heating zone. So if a schedule is on or if the mode is constant ON then the zone will switch to Advance Off or Const Off and vice versa. If a zone is switched ON via Alexa but the room temperature is ABOVE the target temperature (if thermostat support is enabled) then the relay will NOT switch ON until the room temperature falls below the target temperaature. 
+* Note that Alexa will turn on/off the heating zone. So if a schedule is on or if the mode is constant ON then the zone will switch to Advance Off or Const Off and vice versa. If a zone is switched ON via Alexa but the room temperature is ABOVE the target temperature (if thermostat support is enabled) then the relay will NOT switch ON until the room temperature falls below the target temperaature.
+
+## Matter Support
+
+* If Matter is enabled via Tasmota's Configuration | Configure Matter UI the Heating Controller will attempt to send Matter updates to endpoints with the same name as Heating Zone labels.
+* Under Configuration | Configure Matter | Create new endpoint, create one endpoint per heating zone. Ensure the endpoint type is v.Relay (virtual relay) and give the endpoint the same name as you have given the Heating Zone label. The parameter field is not used.
+* Once the endpoints show up in your Matter Controller of choice (e.g., Alexa, Google Home, Home Assistant etc) you will be able to turn the heating zones on or off. 
 
 ## Options
 

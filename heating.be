@@ -65,6 +65,9 @@ class api
     static def next_cron(id)
         return tasmota.next_cron(id)
     end
+    static def get_option(id)
+        return tasmota.get_option(id)
+    end
     static def get_power()
         return tasmota.get_power()
     end
@@ -187,6 +190,8 @@ class util
     static buttons = nil
     # The alexa class handles comms with Alexa
     static alexa = nil
+    # The matter class handles updates to Matter endpoints
+    static matter = nil
 end
 
 class disp
@@ -256,6 +261,12 @@ class status
             util.alexa.set_power(self.zone, self.power)
         end
     end
+    # Update matter endpoint
+    def set_matter()
+        if util.matter
+            util.matter.set_power(self.label, self.power)
+        end
+    end
     # zone.target_temp will be set to zone or schedule 't' field
     def set_target()
         api.settings.zones[self.zone].set_target_temp(self.target)
@@ -298,6 +309,7 @@ class status
         self.pub_mqtt()
         self.update_display()
         self.set_alexa()
+        self.set_matter()
     end
     # Helper map for self.pub_mqtt()
     def tojson()
@@ -1342,6 +1354,47 @@ class alexa
     end
 end
 
+class matter
+    def init()
+        self.add_trigger()
+    end
+    def finditem(m, key)
+        if m.contains(key)
+            return m[key]
+        end
+        for k: m.keys()
+            if classname(m[k]) == 'map'
+                return self.finditem(m[k], key)
+            end
+        end
+    end
+    def add_trigger()
+        api.add_rule(
+            'MtrReceived',
+            / v -> api.set_timer(0, / -> self.on_received(v))
+        )
+    end
+    def on_received(v)
+        var l = self.finditem(v,'Name')
+        var p = self.finditem(v, 'Power')
+        if l != nil && p != nil
+            for z: api.settings.zones.keys()
+                if api.settings.zones.get_label(z) == l
+                    util.override.toggle_zone(z, p)
+                    break
+                end
+            end
+        end
+    end
+    def set_power(name, power)
+        if api.get_option(151)
+            # Matter enabled
+            var update = json.dump({'Name': name, 'Power': power})
+            api.cmd(string.format("MtrUpdate %s", update))
+        end
+    end
+end
+
 class buttons
     static fmt = 'Button%d#Action'
     def init()
@@ -1828,6 +1881,9 @@ class HeatingController
         api.add_rule("HeatingUI=ACK", /-> 
             api.set_timer(0, /-> self.ui_initialised())
         )
+        api.add_rule("Matter#Initialized", /->
+            api.set_timer(0, /-> self.matter_initialised())
+        )
         # Request ACK frm UI & DISPLAY modules
         ui.publish("SYN")
         disp.publish("SYN")
@@ -1836,6 +1892,10 @@ class HeatingController
         # If Alexa emulation enabled configure Alexa devices
         if api.cmd("Emulation")['Emulation'] == 2
             util.alexa = alexa(api.settings.zones)
+        end
+        # Configure Matter comms
+        if !util.matter
+            util.matter = matter()
         end
     end
     # Called once the RTC is initialized (Time#Initialized)
@@ -1848,7 +1908,7 @@ class HeatingController
     # When MQTT connects send heating status for all zones
     def mqtt_connected()
         if util.config.is_option_set(util.options['MQTT'])
-            for z: 0 .. size(api.settings.zones)-1
+            for z: api.settings.zones.keys()
                 api.settings.zones.get_status(z).pub_mqtt()
             end
         end
@@ -1865,6 +1925,14 @@ class HeatingController
         api.set_timer(0, /->api.remove_rule("HeatingUI=SYN"))
         var opt = util.options['UI']
         util.config.configure_option(opt, util.config.is_option_set(opt))
+    end
+    def matter_initialised()
+        if !util.matter
+            util.matter = matter()
+        end
+        for z: util.settings.zones.keys()
+            util.settings.zones.get_status(z).set_matter()
+        end
     end
 end
 
